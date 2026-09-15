@@ -15,10 +15,9 @@ import {
   Globe,
   Radio,
   MapPin,
-  Sparkles,
-  Wind
+  Sparkles
 } from 'lucide-react';
-import { EruptionPresetId, AppTab, KrakatauWeather } from '../types';
+import { EruptionPresetId, AppTab } from '../types';
 import { ERUPTION_PRESETS } from '../data/presets';
 
 interface HeaderProps {
@@ -32,10 +31,6 @@ interface HeaderProps {
   onSelectPreset: (id: EruptionPresetId) => void;
   onOpenRoadmap: () => void;
   onOpenBmkg?: () => void;
-  weather?: KrakatauWeather | null;
-  onOpenWeather?: () => void;
-  onOpenEjectaDetail?: () => void;
-  onOpenAshDetail?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -49,10 +44,6 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectPreset,
   onOpenRoadmap,
   onOpenBmkg,
-  weather,
-  onOpenWeather,
-  onOpenEjectaDetail,
-  onOpenAshDetail,
 }) => {
   return (
     <header className="bg-black/95 backdrop-blur-xl border-b border-zinc-800 text-zinc-100 sticky top-0 z-30 transition-all">
@@ -61,7 +52,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5 text-[11px]">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-semibold bg-white text-black border border-white tracking-wide">
-              <span className="w-1.5 h-1.5 rounded-full bg-black" />
+              <span className="w-1.5 h-1.5 rounded-full bg-black animate-ping" />
               STATUS: SIAGA (LEVEL III)
             </span>
             <span className="text-zinc-700 hidden sm:inline">•</span>
@@ -90,32 +81,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="sm:hidden">Peta Nyata</span>
             </button>
 
-            {onOpenEjectaDetail && (
-              <button
-                id="ejecta-header-btn"
-                onClick={onOpenEjectaDetail}
-                className="px-2.5 py-1 rounded-lg border border-amber-500/40 bg-amber-950/40 hover:bg-amber-900/50 text-amber-200 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-semibold shadow-sm"
-                title="Buka Katalog Lengkap & Telemetri Lemparan Bom Vulkanik"
-              >
-                <span>💥</span>
-                <span className="hidden sm:inline">Detail Lemparan Bom</span>
-                <span className="sm:hidden">Bom</span>
-              </button>
-            )}
-
-            {onOpenAshDetail && (
-              <button
-                id="ash-header-btn"
-                onClick={onOpenAshDetail}
-                className="px-2.5 py-1 rounded-lg border border-purple-500/40 bg-purple-950/40 hover:bg-purple-900/50 text-purple-200 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-semibold shadow-sm"
-                title="Buka Matriks Sebaran Abu & Estimasi Ketebalan Isopach"
-              >
-                <span>☁️</span>
-                <span className="hidden sm:inline">Detail Sebaran Abu</span>
-                <span className="sm:hidden">Abu</span>
-              </button>
-            )}
-
             {onOpenBmkg && (
               <button
                 id="bmkg-header-btn"
@@ -126,21 +91,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <Radio className="w-3.5 h-3.5 text-white" />
                 <span className="hidden sm:inline">Data BMKG (10 Daerah)</span>
                 <span className="sm:hidden">BMKG</span>
-              </button>
-            )}
-
-            {onOpenWeather && (
-              <button
-                id="weather-header-btn"
-                onClick={onOpenWeather}
-                className="px-2.5 py-1 rounded-lg border border-sky-500/40 bg-sky-950/40 hover:bg-sky-900/50 text-sky-200 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-semibold shadow-sm"
-                title="Buka Kondisi Cuaca & Sounding Angin Real-Time Anak Krakatau"
-              >
-                <Wind className="w-3.5 h-3.5 text-sky-400" />
-                <span className="hidden sm:inline">
-                  {weather ? `Cuaca: ${weather.wind.speedMs} m/s (${weather.wind.directionCardinal.split(' ')[0]})` : 'Cuaca Real-Time'}
-                </span>
-                <span className="sm:hidden">Cuaca</span>
               </button>
             )}
 
@@ -157,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({
               {isMuted ? (
                 <VolumeX className="w-3.5 h-3.5 text-zinc-400" />
               ) : (
-                <Volume2 className="w-3.5 h-3.5 text-black" />
+                <Volume2 className="w-3.5 h-3.5 text-black animate-pulse" />
               )}
               <span className="font-medium">{isMuted ? 'Muted' : 'Audio On'}</span>
             </button>

@@ -13,8 +13,6 @@ export interface BallisticParams {
   enableAirDrag: boolean; // toggle air resistance vs ideal parabola
   ventElevation: number; // meters above sea level (Anak Krakatau ~157m)
   gravity: number; // m/s^2 (9.81)
-  projectileCount?: number; // Jumlah proyektil (1 = batu tunggal, >1 = hujan bom vulkanik multiproyektil)
-  dispersionMode?: 'focused' | 'radial'; // 'focused' = kluster terarah sesuai azimut, 'radial' = pancaran 360° keliling kawah
 }
 
 export type CameraPreset3D = 'krakatau' | 'orbit' | 'anyer' | 'kalianda' | 'ship' | 'follow';
@@ -85,58 +83,4 @@ export interface EruptionPreset {
   ballistic: BallisticParams;
   plume: PlumeParams;
   dangerRadiusKm: number;
-}
-
-export interface AtmosphericWindLevel {
-  levelId: 'surface' | '850hpa' | '700hpa' | '500hpa';
-  name: string;
-  altitudeM: number;
-  pressureHpa: number;
-  speedMs: number;
-  speedKmh: number;
-  directionDeg: number;
-  directionCardinal: string;
-  recommendedFor: string;
-}
-
-export interface WeatherForecastPoint {
-  timeIso: string;
-  timeLabel: string;
-  tempC: number;
-  speedMs: number;
-  speedKmh: number;
-  directionDeg: number;
-  directionCardinal: string;
-}
-
-export interface KrakatauWeather {
-  timestamp: string;
-  lastUpdated: string;
-  source: 'OpenWeatherMap' | 'Open-Meteo' | 'Sensor Baseline (Simulasi)';
-  stationName: string;
-  coordinates: {
-    lat: number;
-    lon: number;
-    elevationM: number;
-  };
-  temperatureC: number;
-  apparentTempC: number;
-  relativeHumidity: number; // %
-  pressureHpa: number; // hPa
-  weatherCondition: string;
-  weatherCode: number;
-  surface?: {
-    tempC: number;
-    humidityPct: number;
-  };
-  wind: {
-    speedMs: number;
-    speedKmh: number;
-    directionDeg: number; // Meteorological angle (where wind is coming FROM)
-    driftDirectionDeg: number; // Dispersion drift angle (where ash blows TOWARDS = directionDeg + 180 % 360)
-    directionCardinal: string;
-    gustMs: number;
-  };
-  atmosphericLevels: AtmosphericWindLevel[];
-  forecast: WeatherForecastPoint[];
 }

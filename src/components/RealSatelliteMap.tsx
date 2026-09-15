@@ -6,31 +6,44 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 
-// Defensive safeguard against Leaflet race conditions where getPosition is called on detached/unmounted elements
-if (typeof window !== 'undefined' && L && (L as any).DomUtil) {
-  const domUtil = (L as any).DomUtil;
-  if (!domUtil._posSafeguarded) {
-    domUtil._posSafeguarded = true;
-    const origGetPos = domUtil.getPosition;
-    domUtil.getPosition = function (el: any) {
-      if (!el || typeof el !== 'object') {
-        return new L.Point(0, 0);
-      }
+// Safeguard Leaflet against undefined DOM elements to prevent:
+// Uncaught TypeError: Cannot read properties of undefined (reading '_leaflet_pos')
+if (typeof window !== 'undefined' && L && L.DomUtil) {
+  const origGetPos = L.DomUtil.getPosition;
+  L.DomUtil.getPosition = function (el: any) {
+    if (!el) return new L.Point(0, 0);
+    try {
+      return origGetPos ? origGetPos.call(L.DomUtil, el) : (el._leaflet_pos || new L.Point(0, 0));
+    } catch {
+      return new L.Point(0, 0);
+    }
+  };
+
+  const origSetPos = L.DomUtil.setPosition;
+  L.DomUtil.setPosition = function (el: any, point: any) {
+    if (!el) return;
+    try {
+      if (origSetPos) origSetPos.call(L.DomUtil, el, point);
+      else el._leaflet_pos = point;
+    } catch {
+      if (el) el._leaflet_pos = point;
+    }
+  };
+}
+
+// Safely clear layers with popup unbinding to prevent dangling animation race conditions
+function safeClearLayers(group: L.LayerGroup | null) {
+  if (!group) return;
+  try {
+    group.eachLayer((layer: any) => {
       try {
-        return origGetPos ? origGetPos.call(domUtil, el) : (el._leaflet_pos || new L.Point(0, 0));
-      } catch {
-        return new L.Point(0, 0);
-      }
-    };
-    const origSetPos = domUtil.setPosition;
-    domUtil.setPosition = function (el: any, point: any) {
-      if (!el || typeof el !== 'object') return;
-      try {
-        if (origSetPos) origSetPos.call(domUtil, el, point);
-      } catch {
-        // ignore detached DOM errors
-      }
-    };
+        if (typeof layer.closePopup === 'function') layer.closePopup();
+        if (typeof layer.unbindPopup === 'function') layer.unbindPopup();
+      } catch {}
+    });
+    group.clearLayers();
+  } catch (err) {
+    console.warn('safeClearLayers error:', err);
   }
 }
 
@@ -65,37 +78,20 @@ import {
   CloudRain,
   FileText,
   X,
-  Users,
-  Waves,
-  Plane,
-  Search
+  BarChart3,
 } from 'lucide-react';
-import { BallisticParams, PlumeParams, KrakatauWeather } from '../types';
-import { computeTrajectory3D, computeTrajectory, computeBallisticShower, ShowerBomb } from '../physics/ballistics';
+import { BallisticParams, PlumeParams } from '../types';
+import { computeTrajectory3D, computeTrajectory } from '../physics/ballistics';
 import { AshDispersalDetailModal } from './AshDispersalDetailModal';
-import { VolcanicEjectaDetailModal } from './VolcanicEjectaDetailModal';
 import {
   BMKG_AFFECTED_AREAS,
   BMKG_SIGMET_SCENARIOS,
   BmkgSigmetScenario,
 } from '../data/bmkgData';
-import {
-  COASTAL_HAZARD_NODES,
-  CoastalHazardNode,
-  evaluateNodePlumeImpact,
-  NodeEvaluationResult
-} from '../data/hazardHeatmapData';
-import { HazardHeatmapWidget, HeatmapMode } from './HazardHeatmapWidget';
 import { BmkgAdvisoryModal } from './BmkgAdvisoryModal';
-import { WeatherWidget } from './WeatherWidget';
-import {
-  REGIONAL_INFRASTRUCTURES,
-  FlightLevelKey,
-  FLIGHT_LEVEL_MAP,
-  evaluateInfrastructureImpact,
-  RegionalInfrastructure
-} from '../data/regionalInfrastructureData';
-import { RegionalImpactChecker } from './RegionalImpactChecker';
+import { MapTopBar } from './MapTopBar';
+import { MapAnalysisDrawer } from './MapAnalysisDrawer';
+import { MapSimulationDock } from './MapSimulationDock';
 
 interface RealSatelliteMapProps {
   ballistic: BallisticParams;
@@ -103,16 +99,10 @@ interface RealSatelliteMapProps {
   onUpdateWind?: (speed: number, direction: number) => void;
   onUpdateBallistic?: (params: Partial<BallisticParams>) => void;
   onUpdatePlume?: (params: Partial<PlumeParams>) => void;
-  weather?: KrakatauWeather | null;
-  isLoadingWeather?: boolean;
-  onRefreshWeather?: () => void;
-  isAutoSyncWeather?: boolean;
-  onToggleAutoSyncWeather?: () => void;
-  onOpenWeatherModal?: () => void;
 }
 
 // Vent coordinate: Gunung Anak Krakatau Crater (WGS84)
-const CRATER_COORDS: [number, number] = [-6.1021, 105.4230];
+export const CRATER_COORDS: [number, number] = [-6.1021, 105.4230];
 
 interface GeoPoint {
   id: string;
@@ -228,10 +218,10 @@ const ALKI_SHIPPING_LANE: [number, number][] = [
 ];
 
 // Basemap Tile Providers
-type TileProvider = 'satellite' | 'dark' | 'osm' | 'ocean';
+export type TileProvider = 'satellite' | 'dark' | 'osm' | 'ocean';
 
 const CARTO_API_KEY =
-  ((import.meta as any).env?.VITE_CARTO_API_KEY as string) || 'cb1_3j79_1_fe907188dc90c137acaeb241';
+  (import.meta.env.VITE_CARTO_API_KEY as string) || 'cb1_3j79_1_fe907188dc90c137acaeb241';
 
 const TILE_LAYERS: Record<TileProvider, { name: string; url: string; attribution: string; subdomains?: string[] }> = {
   satellite: {
@@ -325,12 +315,6 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   onUpdateWind,
   onUpdateBallistic,
   onUpdatePlume,
-  weather,
-  isLoadingWeather,
-  onRefreshWeather,
-  isAutoSyncWeather,
-  onToggleAutoSyncWeather,
-  onOpenWeatherModal,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -344,10 +328,6 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   const landmarkGroupRef = useRef<L.LayerGroup | null>(null);
   const shippingGroupRef = useRef<L.LayerGroup | null>(null);
   const bmkgGroupRef = useRef<L.LayerGroup | null>(null);
-  const ballisticAnimGroupRef = useRef<L.LayerGroup | null>(null);
-  const heatmapGroupRef = useRef<L.LayerGroup | null>(null);
-  const so2GroupRef = useRef<L.LayerGroup | null>(null);
-  const regionalGroupRef = useRef<L.LayerGroup | null>(null);
 
   // States
   const [selectedTile, setSelectedTile] = useState<TileProvider>('dark');
@@ -355,22 +335,10 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   const [showActiveTrajectory, setShowActiveTrajectory] = useState<boolean>(true);
   const [showUmbrellaCloud, setShowUmbrellaCloud] = useState<boolean>(true);
   const [showAshPlumeCones, setShowAshPlumeCones] = useState<boolean>(true);
-  const [showWindVector, setShowWindVector] = useState<boolean>(true);
   const [showRadiusLabels, setShowRadiusLabels] = useState<boolean>(true);
   const [showKRBZones, setShowKRBZones] = useState<boolean>(true);
   const [showLandmarks, setShowLandmarks] = useState<boolean>(true);
   const [showShipping, setShowShipping] = useState<boolean>(true);
-
-  // Flight Level & Atmospheric Gas Indicators (Inspired by abu.cikoytew.my.id)
-  const [selectedFlightLevel, setSelectedFlightLevel] = useState<FlightLevelKey>('ALL');
-  const [showSo2Layer, setShowSo2Layer] = useState<boolean>(true);
-  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
-
-  // Population Density & Coastal Hazard Heatmap States
-  const [showHazardHeatmap, setShowHazardHeatmap] = useState<boolean>(true);
-  const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>('composite');
-  const [heatmapOpacity, setHeatmapOpacity] = useState<number>(0.75);
-  const [selectedHeatNodeId, setSelectedHeatNodeId] = useState<string | null>(null);
 
   // BMKG Official Layer & Affected Areas States
   const [showBmkgSigmet, setShowBmkgSigmet] = useState<boolean>(true);
@@ -379,25 +347,22 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   const [isBmkgModalOpen, setIsBmkgModalOpen] = useState<boolean>(false);
   const [activeBmkgScenarioId, setActiveBmkgScenarioId] = useState<string>('sigmet-west-monsoon');
 
-  // Specific animation options requested by user
-  const [showBallisticAnim, setShowBallisticAnim] = useState<boolean>(false);
-  const [isBallisticPlaying, setIsBallisticPlaying] = useState<boolean>(false);
-  const [ballisticTime, setBallisticTime] = useState<number>(0);
-  const [ballisticSpeed, setBallisticSpeed] = useState<number>(1.0);
-
-  const [showSmokeAnim, setShowSmokeAnim] = useState<boolean>(false);
-  const [isSmokePlaying, setIsSmokePlaying] = useState<boolean>(false);
-  const [simTimeMinutes, setSimTimeMinutes] = useState<number>(0);
+  // Post-Eruption Ash Dispersion Simulation States
+  const [simTimeMinutes, setSimTimeMinutes] = useState<number>(35);
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [simSpeed, setSimSpeed] = useState<number>(5);
   const [showIsochrones, setShowIsochrones] = useState<boolean>(true);
-  const [showAshPuffs, setShowAshPuffs] = useState<boolean>(false); // disabled auto-animation
+  const [showAshPuffs, setShowAshPuffs] = useState<boolean>(true);
+  const [showSimDock, setShowSimDock] = useState<boolean>(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState<boolean>(false);
-  const [isEjectaModalOpen, setIsEjectaModalOpen] = useState<boolean>(false);
   const [activeSimTab, setActiveSimTab] = useState<'timeline' | 'eta' | 'deposit'>('timeline');
 
-  // Unified Drawer & Dock UI states (eliminates colliding cards)
-  const [activeDrawer, setActiveDrawer] = useState<'impact' | 'layers' | 'analysis' | 'bmkg' | 'weather' | null>(null);
-  const [activeAnimTab, setActiveAnimTab] = useState<'ballistic' | 'smoke'>('ballistic');
+  // UI Drawer & Popover States
+  const [showOverviewCard, setShowOverviewCard] = useState<boolean>(false);
+  const [isLayersOpen, setIsLayersOpen] = useState<boolean>(false);
+  const [isCameraOpen, setIsCameraOpen] = useState<boolean>(false);
+  const [isBasemapOpen, setIsBasemapOpen] = useState<boolean>(false);
+  const [activeAnalysisTab, setActiveAnalysisTab] = useState<'summary' | 'areas' | 'measure'>('summary');
 
   // Cursor inspector state
   const [cursorInfo, setCursorInfo] = useState<{
@@ -422,7 +387,7 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
     const maxBallisticMeters = computeMaxBallisticEnvelope(ballistic);
     const maxBallisticKm = maxBallisticMeters / 1000;
 
-    // 2. Active Ballistic Trajectory & Multi-Projectile Shower
+    // 2. Active Ballistic Trajectory
     const azimuth = ballistic.launchAzimuth ?? 90;
     const activeTraj = computeTrajectory3D(
       ballistic,
@@ -435,44 +400,20 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
     const activeDistanceMeters = activeLandingPos ? Math.hypot(activeLandingPos.x, activeLandingPos.z) : 0;
     const activeDistanceKm = activeDistanceMeters / 1000;
 
-    // Multi-projectile ballistic shower (volcanic bombs & ejecta burst)
-    const projectileCount = Math.max(1, Math.min(25, ballistic.projectileCount ?? 1));
-    const dispersionMode = ballistic.dispersionMode ?? 'focused';
-    const ballisticShower = computeBallisticShower(
-      ballistic,
-      azimuth,
-      plume.windSpeed,
-      plume.windDirection,
-      projectileCount,
-      dispersionMode
-    );
-
-    let showerMinDistKm = activeDistanceKm;
-    let showerMaxDistKm = activeDistanceKm;
-    let showerTotalEnergyMJ = 0;
-
-    ballisticShower.forEach((bomb) => {
-      const lp = bomb.traj.landingPos;
-      const dKm = lp ? Math.hypot(lp.x, lp.z) / 1000 : 0;
-      if (dKm < showerMinDistKm) showerMinDistKm = dKm;
-      if (dKm > showerMaxDistKm) showerMaxDistKm = dKm;
-      showerTotalEnergyMJ += bomb.traj.impactEnergy / 1e6;
-    });
-
     // 3. Smoke Plume Umbrella Cloud Radius (Carey & Sparks 1986)
     // Vertical column spreads radially at Neutral Buoyancy Level (NBL)
     const umbrellaRadiusKm = Math.min(12, Math.max(0.8, (plume.columnHeight / 1000) * 0.52));
     const umbrellaRadiusMeters = umbrellaRadiusKm * 1000;
 
-    // 4. Ash Plume Downwind Dispersal Reach & Zones (18-Hour Horizon ala abu.cikoytew.my.id)
+    // 4. Ash Plume Downwind Dispersal Reach & Zones
     // Wind blows from plume.windDirection, so ash drifts toward (windDirection + 180)
     const driftAngleDeg = (plume.windDirection + 180) % 360;
     const maxPlumeReachKm = Math.min(
-      380,
-      Math.max(20, (plume.columnHeight / 1000) * 12 + (plume.windSpeed * 3.6) * 18)
+      85,
+      Math.max(12, (plume.columnHeight / 1000) * 9.5 + plume.windSpeed * 2.2)
     );
-    const zone1ReachKm = maxPlumeReachKm * 0.18; // Near zone: heavy lapili & dense ash
-    const zone2ReachKm = maxPlumeReachKm * 0.45; // Mid zone: moderate ashfall
+    const zone1ReachKm = maxPlumeReachKm * 0.22; // Near zone: heavy lapili & dense ash
+    const zone2ReachKm = maxPlumeReachKm * 0.55; // Mid zone: moderate ashfall
     const zone3ReachKm = maxPlumeReachKm; // Far zone: fine ash & SO2 aerosols
 
     // 5. Impacted Landmarks Analysis
@@ -533,12 +474,6 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
       activeDistanceKm,
       activeDistanceMeters,
       activeTraj,
-      ballisticShower,
-      projectileCount,
-      dispersionMode,
-      showerMinDistKm,
-      showerMaxDistKm,
-      showerTotalEnergyMJ,
       umbrellaRadiusKm,
       umbrellaRadiusMeters,
       driftAngleDeg,
@@ -573,17 +508,13 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
     tileLayerRef.current = initialTile;
 
     // Create and add layer groups
-    heatmapGroupRef.current = L.layerGroup().addTo(map);
     hazardGroupRef.current = L.layerGroup().addTo(map);
-    so2GroupRef.current = L.layerGroup().addTo(map);
     plumeGroupRef.current = L.layerGroup().addTo(map);
     simulationGroupRef.current = L.layerGroup().addTo(map);
     ballisticGroupRef.current = L.layerGroup().addTo(map);
-    regionalGroupRef.current = L.layerGroup().addTo(map);
     landmarkGroupRef.current = L.layerGroup().addTo(map);
     shippingGroupRef.current = L.layerGroup().addTo(map);
     bmkgGroupRef.current = L.layerGroup().addTo(map);
-    ballisticAnimGroupRef.current = L.layerGroup().addTo(map);
 
     // Mouse move coordinate inspector
     map.on('mousemove', (e: L.LeafletMouseEvent) => {
@@ -633,28 +564,34 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
         distKm: Number(distKm.toFixed(2)),
         bearingDeg,
       });
+
+      // Close open UI popovers on map click for clean interaction
+      setIsLayersOpen(false);
+      setIsCameraOpen(false);
+      setIsBasemapOpen(false);
     });
 
     mapInstanceRef.current = map;
 
-    const resizeTimer = setTimeout(() => {
+    const invalidateTimer = setTimeout(() => {
       if (mapInstanceRef.current) {
-        try {
-          mapInstanceRef.current.invalidateSize();
-        } catch {
-          // safe catch
-        }
+        mapInstanceRef.current.invalidateSize();
       }
     }, 150);
 
     return () => {
-      clearTimeout(resizeTimer);
-      try {
-        map.remove();
-      } catch {
-        // safe catch
+      clearTimeout(invalidateTimer);
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.eachLayer((layer: any) => {
+            try {
+              if (typeof layer.closePopup === 'function') layer.closePopup();
+            } catch {}
+          });
+          mapInstanceRef.current.remove();
+        } catch {}
+        mapInstanceRef.current = null;
       }
-      mapInstanceRef.current = null;
     };
   }, []);
 
@@ -677,7 +614,7 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   useEffect(() => {
     const group = hazardGroupRef.current;
     if (!group) return;
-    group.clearLayers();
+    safeClearLayers(group);
 
     if (!showKRBZones) return;
 
@@ -727,7 +664,7 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   useEffect(() => {
     const group = ballisticGroupRef.current;
     if (!group) return;
-    group.clearLayers();
+    safeClearLayers(group);
 
     const { maxBallisticKm, maxBallisticMeters, activeDistanceKm, activeTraj } = radiusMetrics;
 
@@ -782,95 +719,84 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
       }
     }
 
-    // B. ACTIVE BALLISTIC TRAJECTORY & TOUCHDOWN IMPACT POINT(S)
-    if (showActiveTrajectory) {
-      const shower = radiusMetrics.ballisticShower;
-      const isShower = shower.length > 1;
+    // B. ACTIVE BALLISTIC TRAJECTORY & TOUCHDOWN IMPACT POINT
+    if (showActiveTrajectory && activeTraj.points.length >= 2) {
+      const pts = activeTraj.points;
+      const latLngs: [number, number][] = pts.map((p) => {
+        const deltaLat = -p.z / 111139; // -Z is North, +Z is South
+        const deltaLon = p.x / (111139 * Math.cos((CRATER_COORDS[0] * Math.PI) / 180));
+        return [CRATER_COORDS[0] + deltaLat, CRATER_COORDS[1] + deltaLon];
+      });
 
-      shower.forEach((bomb, bIdx) => {
-        const pts = bomb.traj.points;
-        if (!pts || pts.length < 2) return;
+      // Trajectory Line
+      const trajPolyline = L.polyline(latLngs, {
+        color: '#ffffff',
+        weight: 3,
+        opacity: 0.95,
+        dashArray: '6, 4',
+      });
+      group.addLayer(trajPolyline);
 
-        const latLngs: [number, number][] = pts.map((p) => {
-          const deltaLat = -p.z / 111139; // -Z is North, +Z is South
-          const deltaLon = p.x / (111139 * Math.cos((CRATER_COORDS[0] * Math.PI) / 180));
-          return [CRATER_COORDS[0] + deltaLat, CRATER_COORDS[1] + deltaLon];
-        });
+      // Impact Point
+      const lastPt = pts[pts.length - 1];
+      const impactCoords = latLngs[latLngs.length - 1];
+      const flightTime = lastPt.t;
+      const impactSpeed = lastPt.speed;
+      const mass = (4 / 3) * Math.PI * Math.pow(ballistic.rockDiameter / 2, 3) * ballistic.rockDensity;
+      const energyMJ = (0.5 * mass * impactSpeed * impactSpeed) / 1e6;
 
-        const isPrimary = bIdx === 0;
-        const color = isPrimary ? (isShower ? '#f97316' : '#ffffff') : bomb.color;
+      // Blast Ring
+      const blastCircle = L.circle(impactCoords, {
+        radius: Math.max(40, ballistic.rockDiameter * 90),
+        color: '#ffffff',
+        weight: 2,
+        fillColor: '#ffffff',
+        fillOpacity: 0.6,
+      });
+      group.addLayer(blastCircle);
 
-        // Trajectory Line
-        const trajPolyline = L.polyline(latLngs, {
-          color,
-          weight: isPrimary ? 3.5 : 2,
-          opacity: isPrimary ? 0.95 : 0.75,
-          dashArray: isPrimary ? (isShower ? '5, 3' : '6, 4') : '4, 4',
-        });
-        group.addLayer(trajPolyline);
-
-        // Impact Point & Physics
-        const lastPt = pts[pts.length - 1];
-        const impactCoords = latLngs[latLngs.length - 1];
-        const flightTime = lastPt.t;
-        const impactSpeed = lastPt.speed;
-        const bombDistKm = Math.hypot(lastPt.x, lastPt.z) / 1000;
-        const mass = bomb.rockMassKg;
-        const energyMJ = (0.5 * mass * impactSpeed * impactSpeed) / 1e6;
-
-        // Blast Ring
-        const blastCircle = L.circle(impactCoords, {
-          radius: Math.max(30, bomb.rockDiameter * (isPrimary ? 80 : 50)),
-          color,
-          weight: isPrimary ? 2 : 1.5,
-          fillColor: color,
-          fillOpacity: isPrimary ? 0.55 : 0.35,
-        });
-        group.addLayer(blastCircle);
-
-        // Impact Marker Pin
-        const impactIcon = L.divIcon({
-          className: 'custom-impact-pin',
-          html: `
-            <div class="relative flex items-center justify-center cursor-pointer">
-              <div class="w-5 h-5 rounded-full absolute" style="background-color: ${color}; opacity: 0.3;"></div>
-              <div class="w-3.5 h-3.5 rounded-full border border-black absolute shadow-xl" style="background-color: ${color};"></div>
-              ${
-                showRadiusLabels && (isPrimary || !isShower || bIdx % 3 === 0 || bIdx === shower.length - 1)
-                  ? `
-                <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-black/95 text-white font-mono text-[9px] px-2 py-0.5 rounded border border-zinc-700 whitespace-nowrap shadow-lg pointer-events-none">
-                  💥 ${bomb.label}: ${bombDistKm.toFixed(2)} km (${flightTime.toFixed(1)}s)
-                </div>
-              `
-                  : ''
-              }
-            </div>
-          `,
-          iconSize: [22, 22],
-          iconAnchor: [11, 11],
-        });
-
-        const impactMarker = L.marker(impactCoords, { icon: impactIcon });
-        impactMarker.bindPopup(`
-          <div class="p-2.5 text-xs font-sans text-zinc-100 min-w-[220px]">
-            <div class="font-bold text-white text-sm flex items-center gap-1.5 border-b border-zinc-800 pb-1.5 mb-1.5">
-              <span style="color: ${color}">💥</span> ${isShower ? bomb.label : 'Titik Benturan Proyektil Aktif'}
-            </div>
-            <div class="space-y-1 font-mono text-[11px] text-zinc-300">
-              <div>Jarak dari Kawah: <strong class="text-white">${bombDistKm.toFixed(2)} km</strong></div>
-              <div>Diameter & Massa: <strong class="text-white">${(bomb.rockDiameter * 100).toFixed(0)} cm • ${mass.toFixed(1)} kg</strong></div>
-              <div>Sudut Elevasi / Azimut: <strong class="text-white">${bomb.launchAngle}° / ${bomb.launchAzimuth}°</strong></div>
-              <div>Waktu Terbang: <strong class="text-white">${flightTime.toFixed(1)} detik</strong></div>
-              <div>Kecepatan Bentur: <strong class="text-white">${impactSpeed.toFixed(0)} m/s</strong> (${(impactSpeed * 3.6).toFixed(0)} km/j)</div>
-              <div>Energi Benturan: <strong class="text-white">${energyMJ.toFixed(2)} MJ</strong></div>
-              <div class="pt-1 mt-1 border-t border-zinc-800 text-[10px]">
-                ${bombDistKm >= 5.0 ? '<span class="text-red-400 font-bold">⚠️ Menembus Radius Steril 5 km!</span>' : '<span class="text-emerald-400 font-semibold">✓ Di Dalam Kaldera Krakatau</span>'}
+      // Impact Marker Pin
+      const impactIcon = L.divIcon({
+        className: 'custom-impact-pin',
+        html: `
+          <div class="relative flex items-center justify-center cursor-pointer">
+            <div class="w-6 h-6 rounded-full bg-white animate-ping opacity-70"></div>
+            <div class="w-4 h-4 rounded-full bg-white border-2 border-black absolute shadow-xl"></div>
+            ${
+              showRadiusLabels
+                ? `
+              <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-black/95 text-white font-mono text-[9px] px-2 py-0.5 rounded border border-zinc-700 whitespace-nowrap shadow-lg pointer-events-none">
+                💥 Benturan: ${activeDistanceKm.toFixed(2)} km (${flightTime.toFixed(1)}s)
               </div>
+            `
+                : ''
+            }
+          </div>
+        `,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+
+      const impactMarker = L.marker(impactCoords, { icon: impactIcon });
+      impactMarker.bindPopup(`
+        <div class="p-2.5 text-xs font-sans text-zinc-100 min-w-[210px]">
+          <div class="font-bold text-white text-sm flex items-center gap-1.5 border-b border-zinc-800 pb-1.5 mb-1.5">
+            💥 Titik Benturan Proyektil Aktif
+          </div>
+          <div class="space-y-1 font-mono text-[11px] text-zinc-300">
+            <div>Jarak dari Kawah: <strong class="text-white">${activeDistanceKm.toFixed(2)} km</strong></div>
+            <div>Sudut Elevasi: <strong class="text-white">${ballistic.launchAngle}°</strong></div>
+            <div>Azimut Lontaran: <strong class="text-white">${ballistic.launchAzimuth ?? 90}°</strong></div>
+            <div>Waktu Terbang: <strong class="text-white">${flightTime.toFixed(1)} detik</strong></div>
+            <div>Kecepatan Bentur: <strong class="text-white">${impactSpeed.toFixed(0)} m/s</strong> (${(impactSpeed * 3.6).toFixed(0)} km/j)</div>
+            <div>Energi Benturan: <strong class="text-white">${energyMJ.toFixed(2)} MJ</strong></div>
+            <div class="pt-1 mt-1 border-t border-zinc-800 text-[10px]">
+              ${activeDistanceKm >= 5.0 ? '<span class="text-red-400 font-bold">⚠️ Menembus Radius Steril 5 km!</span>' : '<span class="text-emerald-400 font-semibold">✓ Di Dalam Kaldera Krakatau</span>'}
             </div>
           </div>
-        `);
-        group.addLayer(impactMarker);
-      });
+        </div>
+      `);
+      group.addLayer(impactMarker);
     }
   }, [radiusMetrics, showMaxBallisticRadius, showActiveTrajectory, showRadiusLabels, ballistic]);
 
@@ -878,7 +804,7 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   useEffect(() => {
     const group = plumeGroupRef.current;
     if (!group) return;
-    group.clearLayers();
+    safeClearLayers(group);
 
     const {
       umbrellaRadiusKm,
@@ -1067,218 +993,30 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
         `);
         group.addLayer(tipMarker);
       }
-
-      // Real-Time Wind Vector Arrow (Meteorological Origin to Downwind Dispersion)
-      if (showWindVector && plume.windSpeed > 0.1) {
-        const windArrowLenKm = Math.min(16, Math.max(6, plume.windSpeed * 1.4));
-        // Start slightly upwind of crater
-        const windStart = getCoordAtBearingAndDist(CRATER_COORDS, (plume.windDirection + 360) % 360, windArrowLenKm * 400);
-        // End downwind of crater
-        const windEnd = getCoordAtBearingAndDist(CRATER_COORDS, (driftAngleDeg + 360) % 360, windArrowLenKm * 600);
-
-        const windLine = L.polyline([windStart, windEnd], {
-          color: '#38bdf8',
-          weight: 3.5,
-          opacity: 0.85,
-          dashArray: '8, 5',
-        });
-        group.addLayer(windLine);
-
-        const windBadgeHtml = `
-          <div class="bg-sky-950/95 text-sky-200 border border-sky-400/60 px-2 py-0.5 rounded-full font-mono text-[9px] font-bold shadow-2xl flex items-center gap-1 whitespace-nowrap transform -translate-x-1/2 -translate-y-1/2 cursor-pointer hover:bg-sky-900 hover:text-white transition-colors">
-            <span>🌬️ Angin: ${plume.windSpeed} m/s (${plume.windDirection}° ➔ ${driftAngleDeg}°)</span>
-          </div>
-        `;
-        const windBadgeIcon = L.divIcon({
-          className: 'custom-wind-vector-badge',
-          html: windBadgeHtml,
-          iconSize: [190, 20],
-          iconAnchor: [95, 10],
-        });
-        const windBadgeMarker = L.marker(windEnd, { icon: windBadgeIcon });
-        windBadgeMarker.bindPopup(`
-          <div class="p-2 text-xs font-sans text-zinc-100">
-            <strong class="text-sky-300">Vektor Angin Real-Time Selat Sunda</strong>
-            <div class="text-[11px] text-zinc-300 font-mono mt-1 space-y-0.5">
-              <div>Kecepatan: <strong>${plume.windSpeed} m/s (${((plume.windSpeed * 3600) / 1000).toFixed(1)} km/j)</strong></div>
-              <div>Arah Datang: <strong>${plume.windDirection}°</strong></div>
-              <div>Arah Dorongan Abu: <strong>${driftAngleDeg}°</strong></div>
-            </div>
-          </div>
-        `);
-        group.addLayer(windBadgeMarker);
-      }
     }
-  }, [radiusMetrics, showUmbrellaCloud, showAshPlumeCones, showWindVector, showRadiusLabels, plume]);
+  }, [radiusMetrics, showUmbrellaCloud, showAshPlumeCones, showRadiusLabels, plume]);
 
-  // 4.1 Ballistic Projectile Flight Time Calculation (Max duration across all shower projectiles)
-  const totalFlightTime = useMemo(() => {
-    const shower = radiusMetrics.ballisticShower;
-    if (!shower || shower.length === 0) return 1;
-    let maxT = 1;
-    for (const b of shower) {
-      if (b.traj.flightTime > maxT) maxT = b.traj.flightTime;
-    }
-    return Math.max(1, maxT);
-  }, [radiusMetrics.ballisticShower]);
-
-  // 4.2 Ballistic Projectile Flight Playback Loop
+  // 5.1 Post-Eruption Ash Simulation Loop (Playback Timer)
   useEffect(() => {
-    if (!showBallisticAnim || !isBallisticPlaying) return;
-    let lastTs = performance.now();
-    let animId: number;
-
-    const tick = (now: number) => {
-      const dt = (now - lastTs) / 1000;
-      lastTs = now;
-
-      setBallisticTime((prev) => {
-        const next = prev + dt * ballisticSpeed;
-        if (next >= totalFlightTime) {
-          setIsBallisticPlaying(false);
-          return totalFlightTime;
-        }
-        return next;
-      });
-
-      animId = requestAnimationFrame(tick);
-    };
-
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
-  }, [showBallisticAnim, isBallisticPlaying, ballisticSpeed, totalFlightTime]);
-
-  // 4.3 Render Animated Ballistic Projectile(s) on Map
-  useEffect(() => {
-    const group = ballisticAnimGroupRef.current;
-    if (!group || !mapInstanceRef.current) return;
-    try {
-      group.clearLayers();
-    } catch {
-      return;
-    }
-
-    if (!showBallisticAnim) return;
-
-    const shower = radiusMetrics.ballisticShower;
-    if (!shower || shower.length === 0) return;
-
-    try {
-      shower.forEach((bomb, bIdx) => {
-        const pts = bomb.traj.points;
-        if (!pts || pts.length < 2) return;
-
-        let idx = pts.findIndex((p) => p.t >= ballisticTime);
-        if (idx === -1) idx = pts.length - 1;
-        const currentPt = pts[idx];
-
-        // Traveled trajectory line
-        const traveledLatLngs: [number, number][] = pts.slice(0, idx + 1).map((p) => {
-          const deltaLat = -p.z / 111139;
-          const deltaLon = p.x / (111139 * Math.cos((CRATER_COORDS[0] * Math.PI) / 180));
-          return [CRATER_COORDS[0] + deltaLat, CRATER_COORDS[1] + deltaLon];
-        });
-
-        const isPrimary = bIdx === 0;
-        const color = isPrimary ? (shower.length > 1 ? '#f97316' : '#ffffff') : bomb.color;
-
-        if (traveledLatLngs.length >= 2) {
-          const activeLine = L.polyline(traveledLatLngs, {
-            color,
-            weight: isPrimary ? 3.5 : 2,
-            opacity: 0.85,
-          });
-          group.addLayer(activeLine);
-        }
-
-        const curDeltaLat = -currentPt.z / 111139;
-        const curDeltaLon = currentPt.x / (111139 * Math.cos((CRATER_COORDS[0] * Math.PI) / 180));
-        const currentCoord: [number, number] = [CRATER_COORDS[0] + curDeltaLat, CRATER_COORDS[1] + curDeltaLon];
-        const isLanded = ballisticTime >= bomb.traj.flightTime;
-
-        if (isLanded) {
-          // Impact blast ring
-          const impactRing = L.circle(currentCoord, {
-            radius: Math.max(30, bomb.rockDiameter * (isPrimary ? 90 : 60)),
-            color: '#ef4444',
-            weight: 2,
-            fillColor: color,
-            fillOpacity: 0.45,
-          });
-          group.addLayer(impactRing);
-
-          // Impact Crater Marker
-          const craterIcon = L.divIcon({
-            className: 'custom-anim-crater-marker',
-            html: `
-              <div class="relative flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                <div class="w-4 h-4 rounded-full border border-white flex items-center justify-center text-[9px] shadow-lg" style="background-color: ${color};">
-                  💥
-                </div>
-              </div>
-            `,
-            iconSize: [16, 16],
-            iconAnchor: [8, 8],
-          });
-          const craterMarker = L.marker(currentCoord, { icon: craterIcon });
-          group.addLayer(craterMarker);
-        } else {
-          // In-Flight Rock / Fireball Marker
-          const rockIcon = L.divIcon({
-            className: 'custom-anim-rock-marker',
-            html: `
-              <div class="relative flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                <div class="w-5 h-5 rounded-full border border-white shadow-xl flex items-center justify-center text-[10px]" style="background-color: ${color};">
-                  🪨
-                </div>
-                ${
-                  isPrimary || shower.length <= 4
-                    ? `
-                  <div class="absolute -top-6 bg-black/95 text-white font-mono text-[8px] px-1.5 py-0.5 rounded border border-zinc-700 whitespace-nowrap shadow-lg">
-                    ${currentPt.y.toFixed(0)}m • ${currentPt.speed.toFixed(0)}m/s
-                  </div>
-                `
-                    : ''
-                }
-              </div>
-            `,
-            iconSize: [20, 20],
-            iconAnchor: [10, 10],
-          });
-
-          const rockMarker = L.marker(currentCoord, { icon: rockIcon });
-          group.addLayer(rockMarker);
-        }
-      });
-    } catch {
-      // safe catch
-    }
-  }, [showBallisticAnim, ballisticTime, radiusMetrics.ballisticShower, totalFlightTime]);
-
-  // 5.1 Post-Eruption Ash Simulation Loop (Playback Timer: Up to 18 Hours / 1080 Minutes)
-  useEffect(() => {
-    if (!showSmokeAnim || !isSmokePlaying) return;
+    if (!isPlaying) return;
     const interval = setInterval(() => {
       setSimTimeMinutes((prev) => {
-        const step = simSpeed * 0.5;
+        const step = simSpeed * 0.35;
         const next = prev + step;
-        if (next >= 1080) {
-          setIsSmokePlaying(false);
-          return 1080;
+        if (next >= 360) {
+          return 0; // loops back to eruption moment
         }
         return Number(next.toFixed(1));
       });
-    }, 100);
+    }, 150);
     return () => clearInterval(interval);
-  }, [showSmokeAnim, isSmokePlaying, simSpeed]);
+  }, [isPlaying, simSpeed]);
 
-  // 5.2 Dynamic Post-Eruption Plume Evolution & Isochrones (Only when showSmokeAnim is true)
+  // 5.2 Dynamic Post-Eruption Plume Evolution, Animated Puffs & Isochrones
   useEffect(() => {
     const group = simulationGroupRef.current;
     if (!group) return;
-    group.clearLayers();
-
-    if (!showSmokeAnim) return;
+    safeClearLayers(group);
 
     const {
       driftAngleDeg,
@@ -1414,7 +1152,7 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
         className: 'custom-sim-front-pin',
         html: `
           <div class="relative flex items-center justify-center cursor-pointer transform -translate-x-1/2 -translate-y-1/2">
-            <div class="w-5 h-5 rounded-full bg-white/20 absolute"></div>
+            <div class="w-6 h-6 rounded-full bg-white/40 animate-ping absolute"></div>
             <div class="w-3.5 h-3.5 rounded-full bg-white border-2 border-black shadow-2xl"></div>
             <div class="absolute -top-7 bg-white text-black font-mono font-bold text-[9px] px-2 py-0.5 rounded-full shadow-2xl border border-black whitespace-nowrap">
               💨 Depan Abu: ${timeStr} (${currentFrontKm.toFixed(1)} km)
@@ -1527,7 +1265,7 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   useEffect(() => {
     const group = landmarkGroupRef.current;
     if (!group) return;
-    group.clearLayers();
+    safeClearLayers(group);
 
     if (!showLandmarks) return;
 
@@ -1548,9 +1286,9 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
           <div class="group relative flex items-center justify-center cursor-pointer">
             <div class="w-3.5 h-3.5 rounded-full ${
               lm.inBallistic
-                ? 'bg-amber-400 border-2 border-black'
+                ? 'bg-amber-400 border-2 border-black animate-pulse'
                 : isReachedNow
-                ? 'bg-red-500 border-2 border-white'
+                ? 'bg-white border-2 border-black animate-ping'
                 : lm.inPlume
                 ? 'bg-zinc-400 border-2 border-black'
                 : 'bg-zinc-900 border-2 border-white'
@@ -1636,7 +1374,7 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   useEffect(() => {
     const group = shippingGroupRef.current;
     if (!group) return;
-    group.clearLayers();
+    safeClearLayers(group);
 
     if (!showShipping) return;
 
@@ -1663,7 +1401,7 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   useEffect(() => {
     const group = bmkgGroupRef.current;
     if (!group) return;
-    group.clearLayers();
+    safeClearLayers(group);
 
     const activeScenario =
       BMKG_SIGMET_SCENARIOS.find((s) => s.id === activeBmkgScenarioId) || BMKG_SIGMET_SCENARIOS[0];
@@ -1982,402 +1720,6 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
     }
   }, [showBmkgSigmet, showBmkgAshDeposit, showBmkgAffectedAreas, activeBmkgScenarioId, showRadiusLabels, radiusMetrics, simTimeMinutes]);
 
-  // 8. Interactive Population Density & Coastal Hazard Heatmap Overlay
-  useEffect(() => {
-    const group = heatmapGroupRef.current;
-    if (!group) return;
-    group.clearLayers();
-
-    if (!showHazardHeatmap) return;
-
-    COASTAL_HAZARD_NODES.forEach((node) => {
-      const evaluated = evaluateNodePlumeImpact(node, plume);
-
-      let score = 0;
-      let labelMode = '';
-      if (heatmapMode === 'composite') {
-        score = evaluated.compositeRiskScore;
-        labelMode = 'Risiko Dampak Abu';
-      } else if (heatmapMode === 'population') {
-        score = Math.min(100, Math.round((node.populationDensity / 3500) * 100));
-        labelMode = 'Kepadatan Penduduk';
-      } else {
-        score = node.coastalVulnerabilityIndex;
-        labelMode = 'Bahaya Elevasi Pesisir';
-      }
-
-      // Color Ramp
-      let color = '#10b981'; // Emerald
-      let strokeColor = '#059669';
-      let riskLabel = 'RENDAH';
-      let badgeBg = 'bg-emerald-500 text-white';
-      if (score >= 75) {
-        color = '#ef4444'; // Red
-        strokeColor = '#b91c1c';
-        riskLabel = 'KRITIS';
-        badgeBg = 'bg-red-500 text-white';
-      } else if (score >= 50) {
-        color = '#f97316'; // Orange
-        strokeColor = '#c2410c';
-        riskLabel = 'TINGGI';
-        badgeBg = 'bg-orange-500 text-black font-extrabold';
-      } else if (score >= 25) {
-        color = '#eab308'; // Amber
-        strokeColor = '#a16207';
-        riskLabel = 'SEDANG';
-        badgeBg = 'bg-amber-400 text-black font-extrabold';
-      }
-
-      // Multi-layer concentric heat circles for smooth heat spot appearance
-      const baseRadiusMeters = 3200 + score * 35;
-
-      // Outer Heat Aura
-      const outerRing = L.circle(node.coords, {
-        radius: baseRadiusMeters * 1.5,
-        color: color,
-        weight: 0,
-        fillColor: color,
-        fillOpacity: 0.10 * heatmapOpacity,
-        interactive: false,
-      });
-      group.addLayer(outerRing);
-
-      // Mid Heat Ring
-      const midRing = L.circle(node.coords, {
-        radius: baseRadiusMeters * 0.9,
-        color: color,
-        weight: 0,
-        fillColor: color,
-        fillOpacity: 0.25 * heatmapOpacity,
-        interactive: false,
-      });
-      group.addLayer(midRing);
-
-      // Core Heat Ring
-      const coreRing = L.circle(node.coords, {
-        radius: baseRadiusMeters * 0.45,
-        color: strokeColor,
-        weight: 1.5,
-        opacity: 0.75 * heatmapOpacity,
-        fillColor: color,
-        fillOpacity: 0.55 * heatmapOpacity,
-      });
-      group.addLayer(coreRing);
-
-      // Center Interactive Node Badge
-      const isPlumeThreat = evaluated.inPlumeCone;
-      const nodeHtml = `
-        <div class="relative flex items-center justify-center cursor-pointer group">
-          ${isPlumeThreat ? '<div class="absolute w-8 h-8 rounded-full bg-red-500/40 animate-ping"></div>' : ''}
-          <div class="w-5 h-5 rounded-full border-2 border-white shadow-2xl flex items-center justify-center text-[10px] text-white font-bold" style="background-color: ${color};">
-            ${heatmapMode === 'population' ? '👥' : heatmapMode === 'coastal' ? '🌊' : (isPlumeThreat ? '⚠️' : '🛡️')}
-          </div>
-          <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap bg-zinc-950/95 text-white font-mono text-[8.5px] px-2 py-0.5 rounded-full border border-zinc-700 shadow-2xl pointer-events-none group-hover:scale-110 transition-transform flex items-center gap-1 z-10">
-            <span class="w-1.5 h-1.5 rounded-full" style="background-color: ${color};"></span>
-            <span>${node.name.split(' (')[0]}</span>
-            <span class="text-zinc-400">(${score})</span>
-          </div>
-        </div>
-      `;
-
-      const divIcon = L.divIcon({
-        className: 'custom-hazard-heat-node',
-        html: nodeHtml,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      });
-
-      const marker = L.marker(node.coords, { icon: divIcon });
-      marker.bindPopup(`
-        <div class="p-3 text-xs font-sans text-zinc-100 min-w-[280px] max-w-sm">
-          <div class="flex items-start justify-between border-b border-zinc-800 pb-2 mb-2">
-            <div>
-              <div class="font-bold text-white text-sm">${node.name}</div>
-              <div class="text-[10.5px] text-zinc-400">${node.subdistrict}, ${node.regency}</div>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[9.5px] font-bold font-mono shadow ${badgeBg}">
-              ${riskLabel} (${score}/100)
-            </span>
-          </div>
-
-          <div class="grid grid-cols-2 gap-2 text-[10px] font-mono bg-zinc-950 p-2 rounded-xl border border-zinc-850 mb-2">
-            <div>
-              <span class="text-zinc-500 block">Kepadatan Penduduk:</span>
-              <strong class="text-white">${node.populationDensity} jiwa/km²</strong>
-              <span class="text-zinc-400 text-[9px] block">Total: ${node.populationTotal.toLocaleString('id-ID')} jiwa</span>
-            </div>
-            <div>
-              <span class="text-zinc-500 block">Elevasi Pantai:</span>
-              <strong class="text-white">${node.coastalElevationM} mdpl</strong>
-              <span class="text-zinc-400 text-[9px] block">Jarak laut: ${node.shorelineDistanceM}m</span>
-            </div>
-            <div>
-              <span class="text-zinc-500 block">Indeks Kerentanan Pesisir:</span>
-              <strong class="text-amber-400">${node.coastalVulnerabilityIndex} / 100</strong>
-            </div>
-            <div>
-              <span class="text-zinc-500 block">Runup Tsunami 2018:</span>
-              <strong class="text-red-400">${node.tsunami2018RunupM} meter</strong>
-            </div>
-          </div>
-
-          <div class="p-2 rounded-xl bg-zinc-900 border border-zinc-800 space-y-1 text-[10px] mb-2">
-            <div class="font-semibold text-zinc-200 flex items-center justify-between">
-              <span>Paparan Awan Abu Vulkanik:</span>
-              <span class="${isPlumeThreat ? 'text-red-400 font-bold' : 'text-emerald-400'}">
-                ${isPlumeThreat ? '⚠️ TERPAPAR ANGIN AKTIF' : '✓ Aman dari Jalur Angin'}
-              </span>
-            </div>
-            ${isPlumeThreat ? `
-              <div class="flex justify-between font-mono text-zinc-300">
-                <span>Estimasi Tebal Isopach:</span>
-                <strong class="text-amber-300">${evaluated.isopachThicknessMm} mm</strong>
-              </div>
-              <div class="flex justify-between font-mono text-zinc-300">
-                <span>Waktu Tiba Abu (ETA):</span>
-                <strong class="text-white">± ${evaluated.etaMinutes} menit</strong>
-              </div>
-              <div class="flex justify-between font-mono text-zinc-300">
-                <span>Konsentrasi Partikel:</span>
-                <strong class="text-white">${evaluated.ashConcentrationMgM3} mg/m³</strong>
-              </div>
-            ` : `
-              <div class="text-[9px] text-zinc-400 italic">
-                Arah angin saat ini meniup ke ${radiusMetrics.driftAngleDeg}°, menjauhi kawasan ini.
-              </div>
-            `}
-          </div>
-
-          <div class="text-[9.5px] text-zinc-300 leading-relaxed bg-amber-950/20 p-2 rounded-lg border border-amber-500/20 mb-2">
-            <strong class="text-amber-300 block mb-0.5">Rekomendasi Penanganan Bencana:</strong>
-            ${evaluated.recommendedAction}
-          </div>
-
-          <div class="flex items-center justify-between pt-1 border-t border-zinc-800 text-[9px] text-zinc-400 font-mono">
-            <span>Kapasitas Evakuasi: <strong class="text-white">${node.evacuationCapacity}</strong></span>
-            <span>Jarak Kawah: <strong class="text-white">${node.distKm.toFixed(1)} km</strong></span>
-          </div>
-        </div>
-      `);
-
-      group.addLayer(marker);
-    });
-  }, [showHazardHeatmap, heatmapMode, heatmapOpacity, plume, radiusMetrics]);
-
-  // 9. Sulfur Dioxide (SO2) Gas Satellite Plume Layer (Sentinel-5P TROPOMI style)
-  useEffect(() => {
-    const group = so2GroupRef.current;
-    if (!group) return;
-    group.clearLayers();
-
-    if (!showSo2Layer) return;
-
-    const { driftAngleDeg, maxPlumeReachKm } = radiusMetrics;
-    const driftAngleRad = (driftAngleDeg * Math.PI) / 180;
-
-    // Gas SO2 travels ~25% farther than heavy ash particles and fans wider
-    const so2MaxReachKm = Math.min(420, maxPlumeReachKm * 1.25);
-    const currentSo2ReachKm = showSmokeAnim
-      ? Math.min(so2MaxReachKm, Math.max(1.0, (plume.windSpeed * 3.6) * (simTimeMinutes / 60) * 1.12))
-      : so2MaxReachKm;
-
-    if (currentSo2ReachKm < 0.6) return;
-
-    const buildConeCoords = (rStartKm: number, rEndKm: number, widthRatio: number) => {
-      const coords: [number, number][] = [];
-      const steps = 14;
-      for (let i = 0; i <= steps; i++) {
-        const frac = i / steps;
-        const crossKm = (frac - 0.5) * 2 * (rStartKm * widthRatio);
-        const angle = driftAngleRad + Math.atan2(crossKm, Math.max(0.1, rStartKm));
-        const hyp = Math.hypot(rStartKm, crossKm);
-        coords.push(getCoordAtBearingAndDist(CRATER_COORDS, (angle * 180) / Math.PI, hyp * 1000));
-      }
-      for (let i = steps; i >= 0; i--) {
-        const frac = i / steps;
-        const crossKm = (frac - 0.5) * 2 * (rEndKm * widthRatio);
-        const angle = driftAngleRad + Math.atan2(crossKm, Math.max(0.1, rEndKm));
-        const hyp = Math.hypot(rEndKm, crossKm);
-        coords.push(getCoordAtBearingAndDist(CRATER_COORDS, (angle * 180) / Math.PI, hyp * 1000));
-      }
-      return coords;
-    };
-
-    // Outer contour: Low SO2 (> 5 Dobson Units, DU) - Indigo/Violet
-    const outerCoords = buildConeCoords(0.4, currentSo2ReachKm, 0.44);
-    const outerPoly = L.polygon(outerCoords, {
-      color: '#818cf8',
-      weight: 1.2,
-      dashArray: '4, 4',
-      fillColor: '#6366f1',
-      fillOpacity: 0.14,
-    });
-    outerPoly.bindPopup(`
-      <div class="p-2.5 text-xs font-sans text-zinc-100 min-w-[240px]">
-        <div class="flex items-center justify-between border-b border-zinc-800 pb-1 mb-1.5">
-          <span class="font-bold text-indigo-300 text-sm">Awan Gas SO₂ (> 5 DU)</span>
-          <span class="text-[9px] font-mono bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-700">TROPOMI Advisory</span>
-        </div>
-        <div class="text-[11px] text-zinc-300 space-y-1">
-          <div>Sebaran gas sulfur dioksida halus melayang di atmosfer.</div>
-          <div class="font-mono text-[10px] text-zinc-400">Jangkauan: ${currentSo2ReachKm.toFixed(1)} km | Koridor: ${driftAngleDeg}°</div>
-          <div class="text-[10px] text-zinc-400">Peringatan ICAO / VAAC Darwin bagi koridor jelajah udara.</div>
-        </div>
-      </div>
-    `);
-    group.addLayer(outerPoly);
-
-    // Mid contour: Moderate SO2 (> 20 DU) - Fuchsia
-    const midReach = currentSo2ReachKm * 0.62;
-    if (midReach > 1.8) {
-      const midCoords = buildConeCoords(0.4, midReach, 0.35);
-      const midPoly = L.polygon(midCoords, {
-        color: '#c026d3',
-        weight: 1.5,
-        fillColor: '#d946ef',
-        fillOpacity: 0.22,
-      });
-      midPoly.bindPopup(`
-        <div class="p-2.5 text-xs font-sans text-zinc-100 min-w-[240px]">
-          <div class="flex items-center justify-between border-b border-zinc-800 pb-1 mb-1.5">
-            <span class="font-bold text-fuchsia-300 text-sm">Konsentrasi Gas SO₂ Sedang (> 20 DU)</span>
-            <span class="text-[9px] font-mono bg-fuchsia-950 text-fuchsia-300 px-1.5 py-0.5 rounded border border-fuchsia-700">Iritasi Pernafasan</span>
-          </div>
-          <div class="text-[11px] text-zinc-300 space-y-1">
-            <div>Tercium bau belerang menyengat, iritasi pada mata dan saluran pernapasan.</div>
-            <div class="font-mono text-[10px] text-zinc-400">Jangkauan: ${midReach.toFixed(1)} km</div>
-          </div>
-        </div>
-      `);
-      group.addLayer(midPoly);
-    }
-
-    // Core zone: High SO2 (> 50 DU) - Magenta/Rose
-    const coreReach = currentSo2ReachKm * 0.30;
-    if (coreReach > 1.0) {
-      const coreCoords = buildConeCoords(0.3, coreReach, 0.25);
-      const corePoly = L.polygon(coreCoords, {
-        color: '#f43f5e',
-        weight: 1.8,
-        fillColor: '#e11d48',
-        fillOpacity: 0.35,
-      });
-      corePoly.bindPopup(`
-        <div class="p-2.5 text-xs font-sans text-zinc-100 min-w-[240px]">
-          <div class="flex items-center justify-between border-b border-zinc-800 pb-1 mb-1.5">
-            <span class="font-bold text-rose-300 text-sm">Konsentrasi Gas SO₂ Sangat Pekat (> 50 DU)</span>
-            <span class="text-[9px] font-mono bg-rose-950 text-rose-300 px-1.5 py-0.5 rounded border border-rose-700">Bahaya Toksik</span>
-          </div>
-          <div class="text-[11px] text-zinc-300 space-y-1">
-            <div>Zona dekat kawah dengan emisi sulfur dioksida primer tinggi (~1.200 ton/hari).</div>
-            <div class="font-mono text-[10px] text-zinc-400">Jangkauan: ${coreReach.toFixed(1)} km</div>
-          </div>
-        </div>
-      `);
-      group.addLayer(corePoly);
-    }
-  }, [showSo2Layer, radiusMetrics, plume, simTimeMinutes, showSmokeAnim]);
-
-  // 10. Regional Infrastructure & Strategic Assets Layer (Airports, Ports, Cities)
-  useEffect(() => {
-    const group = regionalGroupRef.current;
-    if (!group) return;
-    group.clearLayers();
-
-    const forecastHours = Math.max(0, Math.round(simTimeMinutes / 60));
-
-    REGIONAL_INFRASTRUCTURES.forEach((infra) => {
-      const evalResult = evaluateInfrastructureImpact(infra, plume, forecastHours, selectedFlightLevel);
-
-      let pinColor = '#10b981'; // green (Aman)
-      let borderCol = '#059669';
-      const statusEmoji = infra.type === 'airport' ? '✈️' : infra.type === 'seaport' ? '⚓' : '🏙️';
-
-      if (evalResult.threatLevel === 'KRITIS') {
-        pinColor = '#ef4444';
-        borderCol = '#b91c1c';
-      } else if (evalResult.threatLevel === 'WASPADA') {
-        pinColor = '#f59e0b';
-        borderCol = '#d97706';
-      }
-
-      const isSelected = selectedLocationId === infra.id;
-
-      const html = `
-        <div class="relative flex items-center justify-center cursor-pointer group">
-          ${evalResult.threatLevel === 'KRITIS' ? '<div class="absolute w-7 h-7 rounded-full bg-red-500/50 animate-ping"></div>' : ''}
-          <div class="w-6 h-6 rounded-full border-2 border-white shadow-xl flex items-center justify-center text-[11px] text-white font-bold transition-transform group-hover:scale-125 ${isSelected ? 'ring-2 ring-amber-400 scale-125' : ''}" style="background-color: ${pinColor}; border-color: ${borderCol};">
-            ${statusEmoji}
-          </div>
-          <div class="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-zinc-950/95 text-white font-mono text-[8.5px] px-1.5 py-0.5 rounded border border-zinc-700 shadow-xl pointer-events-none flex items-center gap-1">
-            <span>${infra.code ? infra.code : infra.name.split(' ')[0]}</span>
-            <span class="text-[7.5px] px-1 py-0.2 rounded font-bold ${
-              evalResult.threatLevel === 'KRITIS' ? 'bg-red-900 text-red-200' :
-              evalResult.threatLevel === 'WASPADA' ? 'bg-amber-900 text-amber-200' : 'bg-emerald-900 text-emerald-200'
-            }">
-              ${evalResult.threatLevel === 'KRITIS' ? 'TERDAMPAK' : evalResult.threatLevel === 'WASPADA' ? 'WASPADA' : 'AMAN'}
-            </span>
-          </div>
-        </div>
-      `;
-
-      const markerIcon = L.divIcon({
-        className: 'custom-regional-infra-pin',
-        html,
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
-      });
-
-      const marker = L.marker(infra.coords, { icon: markerIcon });
-      marker.bindPopup(`
-        <div class="p-3 text-xs font-sans text-zinc-100 min-w-[280px]">
-          <div class="flex items-center justify-between border-b border-zinc-800 pb-1.5 mb-2">
-            <div>
-              <div class="font-bold text-white text-sm flex items-center gap-1">
-                <span>${statusEmoji}</span>
-                <span>${infra.name}</span>
-                ${infra.code ? `<span class="font-mono text-zinc-400 text-xs">(${infra.code})</span>` : ''}
-              </div>
-              <div class="text-[10px] text-zinc-400 font-mono">${infra.province} • ${infra.bearingCardinal} (${infra.bearingDeg}°)</div>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold ${
-              evalResult.threatLevel === 'KRITIS'
-                ? 'bg-red-950 text-red-300 border border-red-700 animate-pulse'
-                : evalResult.threatLevel === 'WASPADA'
-                ? 'bg-amber-950 text-amber-300 border border-amber-700'
-                : 'bg-emerald-950 text-emerald-300 border border-emerald-700'
-            }">
-              ${evalResult.threatLevel}
-            </span>
-          </div>
-
-          <div class="grid grid-cols-2 gap-1.5 text-[10px] font-mono bg-zinc-950 p-2 rounded-lg border border-zinc-850 mb-2">
-            <div><span class="text-zinc-500">Jarak Kawah:</span> <strong class="text-white">${infra.distKm} km (${infra.bearingDeg}°)</strong></div>
-            <div><span class="text-zinc-500">Estimasi Tiba (ETA):</span> <strong class="text-white">${evalResult.etaHours !== null ? `T+${evalResult.etaHours.toFixed(1)} Jam` : 'Di luar radius'}</strong></div>
-            <div><span class="text-zinc-500">Endapan Abu:</span> <strong class="text-white">${evalResult.estimatedAshThicknessMm.toFixed(1)} mm</strong></div>
-            <div><span class="text-zinc-500">Konsentrasi SO₂:</span> <strong class="text-white">${evalResult.estimatedSo2Du} DU</strong></div>
-          </div>
-
-          <div class="text-[10px] bg-zinc-900/80 p-2 rounded-lg border border-zinc-800 text-zinc-300 mb-2">
-            <div class="text-[9.5px] text-zinc-400 font-mono mb-1">Status Operasional Koridor Udara (${selectedFlightLevel}):</div>
-            <p class="font-semibold text-white leading-tight">${evalResult.flightSafetyStatus}</p>
-          </div>
-
-          <div class="text-[9.5px] text-amber-300/90 leading-relaxed bg-amber-950/20 p-2 rounded-lg border border-amber-500/20">
-            <strong class="text-amber-200 block mb-0.5">Saran Mitigasi / NOTAM:</strong>
-            ${evalResult.recommendation}
-          </div>
-        </div>
-      `);
-
-      marker.on('click', () => {
-        setSelectedLocationId(infra.id);
-      });
-
-      group.addLayer(marker);
-    });
-  }, [plume, simTimeMinutes, selectedFlightLevel, selectedLocationId]);
-
   const handleApplyBmkgScenario = (scenario: BmkgSigmetScenario) => {
     setActiveBmkgScenarioId(scenario.id);
     // Wind blows from (driftDirectionDeg + 180) so that downwind plume drifts towards driftDirectionDeg
@@ -2446,1336 +1788,98 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
     (lm) => lm.inPlume && lm.distKm <= Number(simCurrentFrontKm)
   );
 
-  // Real-time calculations for Ballistic Projectile Animation Dock
-  const activeTrajPts = radiusMetrics.activeTraj.points || [];
-  const currentBallisticPt = useMemo(() => {
-    if (!activeTrajPts.length) return { t: 0, x: 0, y: 0, z: 0, speed: 0, vx: 0, vy: 0, vz: 0 };
-    let idx = activeTrajPts.findIndex((p) => p.t >= ballisticTime);
-    if (idx === -1) idx = activeTrajPts.length - 1;
-    return activeTrajPts[idx];
-  }, [activeTrajPts, ballisticTime]);
-
-  const ballisticDistKm = Math.hypot(currentBallisticPt.x, currentBallisticPt.z) / 1000;
-  const isBallisticLanded = ballisticTime >= totalFlightTime;
-  const rockMassKg = (4 / 3) * Math.PI * Math.pow(ballistic.rockDiameter / 2, 3) * ballistic.rockDensity;
-  const currentEnergyMJ = (0.5 * rockMassKg * Math.pow(currentBallisticPt.speed, 2)) / 1e6;
+  const activeLayersCount = [
+    showMaxBallisticRadius,
+    showActiveTrajectory,
+    showUmbrellaCloud,
+    showAshPlumeCones,
+    showRadiusLabels,
+    showKRBZones,
+    showIsochrones,
+    showAshPuffs,
+    showLandmarks,
+    showShipping,
+    showBmkgSigmet,
+    showBmkgAshDeposit,
+    showBmkgAffectedAreas,
+  ].filter(Boolean).length;
 
   return (
     <div className="relative w-full min-h-[720px] h-[780px] rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl bg-black select-none group font-sans">
       {/* Leaflet DOM Mounting Container */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-      {/* TOP BAR: Clean, Non-Colliding Navigation & Animation Control Bar */}
-      <div className="absolute top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-        {/* Left: Basemap Switcher & Quick Camera Shortcuts */}
-        <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 bg-black/92 backdrop-blur-xl px-2.5 py-1.5 rounded-xl border border-zinc-800 shadow-xl text-xs">
-          <span className="text-[10px] font-mono text-zinc-400 font-semibold mr-1 hidden sm:inline">
-            Peta:
-          </span>
-          {(['dark', 'satellite', 'osm', 'ocean'] as TileProvider[]).map((tileKey) => (
-            <button
-              key={tileKey}
-              onClick={() => setSelectedTile(tileKey)}
-              className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-all border ${
-                selectedTile === tileKey
-                  ? 'bg-white text-black font-bold border-white shadow-sm'
-                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800'
-              }`}
-            >
-              {tileKey === 'satellite' && '🛰️ Satelit'}
-              {tileKey === 'dark' && '🌑 Gelap'}
-              {tileKey === 'osm' && '🗺️ Topo'}
-              {tileKey === 'ocean' && '🌊 Batimetri'}
-            </button>
-          ))}
-
-          <div className="h-3.5 w-px bg-zinc-800 mx-1 hidden sm:block" />
-
-          <span className="text-[10px] font-mono text-zinc-400 font-semibold mr-0.5 hidden md:inline">
-            Fokus:
-          </span>
-          <button
-            onClick={() => handleFlyTo(CRATER_COORDS, 14)}
-            className="px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white text-[10px] font-medium"
-            title="Fokus ke Kawah Aktif Anak Krakatau"
-          >
-            🌋 Kawah
-          </button>
-          <button
-            onClick={() => handleFlyTo([-6.102, 105.423], 12)}
-            className="px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white text-[10px] font-medium"
-            title="Fokus ke Kaldera Krakatau"
-          >
-            🏝️ Kaldera
-          </button>
-          <button
-            onClick={() => handleFlyTo([-6.0, 105.7], 10)}
-            className="px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white text-[10px] font-medium hidden sm:inline"
-            title="Tinjauan Selat Sunda"
-          >
-            🌊 Selat Sunda
-          </button>
-          <button
-            onClick={() => handleFlyTo([-6.05, 105.9], 11)}
-            className="px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white text-[10px] font-medium hidden lg:inline"
-            title="Pesisir Banten (Anyer)"
-          >
-            🏖️ Anyer
-          </button>
-        </div>
-
-        {/* Right: Flight Level Selector, Quick Toggles & Drawer Action Buttons */}
-        <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 bg-black/92 backdrop-blur-xl px-2.5 py-1.5 rounded-xl border border-zinc-800 shadow-xl text-xs">
-          {/* Flight Level (FL) Corridor Selector ala abu.cikoytew.my.id */}
-          <div className="flex items-center gap-1 bg-zinc-900/90 rounded-lg p-0.5 border border-zinc-800">
-            <span className="text-[10px] text-zinc-400 font-mono px-1.5 flex items-center gap-1">
-              <Plane className="w-3 h-3 text-sky-400" />
-              <span className="hidden xl:inline">Level:</span>
-            </span>
-            {(['ALL', 'SFC-FL100', 'FL100-FL250', 'FL250-FL450'] as FlightLevelKey[]).map((flKey) => (
-              <button
-                key={flKey}
-                onClick={() => setSelectedFlightLevel(flKey)}
-                className={`px-2 py-0.5 rounded text-[10px] font-mono transition-all ${
-                  selectedFlightLevel === flKey
-                    ? 'bg-sky-500 text-black font-bold shadow'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                }`}
-                title={`${FLIGHT_LEVEL_MAP[flKey].label} (${FLIGHT_LEVEL_MAP[flKey].altitudeFeet}) - ${FLIGHT_LEVEL_MAP[flKey].targetAircraft}`}
-              >
-                {flKey === 'ALL' ? 'Semua' : flKey}
-              </button>
-            ))}
-          </div>
-
-          <div className="h-3.5 w-px bg-zinc-800 mx-0.5 hidden sm:block" />
-
-          {/* Quick Toggle: SO2 Gas Satellite Plume */}
-          <button
-            onClick={() => setShowSo2Layer(!showSo2Layer)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-all border ${
-              showSo2Layer
-                ? 'bg-fuchsia-950/80 text-fuchsia-300 border-fuchsia-500/60 shadow-sm'
-                : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
-            }`}
-            title="Overlay Citra Satelit Gas Belerang SO2 (Sentinel-5P TROPOMI Advisory)"
-          >
-            <span>🧪</span>
-            <span className="hidden md:inline">Gas SO₂</span>
-            <span className={`px-1.5 py-0.2 rounded text-[8.5px] font-mono font-bold ${showSo2Layer ? 'bg-fuchsia-500 text-black' : 'bg-zinc-800 text-zinc-400'}`}>
-              {showSo2Layer ? 'ON' : 'OFF'}
-            </span>
-          </button>
-
-          {/* Quick Toggle: Heatmap Bahaya */}
-          <button
-            id="toggle-hazard-heatmap-btn"
-            onClick={() => setShowHazardHeatmap(!showHazardHeatmap)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-all border ${
-              showHazardHeatmap
-                ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md shadow-amber-500/20'
-                : 'bg-zinc-900 text-amber-300 border-amber-500/40 hover:bg-amber-950/40 hover:text-white'
-            }`}
-            title="Overlay interaktif heatmap kepadatan penduduk & bahaya pesisir Selat Sunda"
-          >
-            <span>👥</span>
-            <span className="hidden md:inline">Heatmap Bahaya</span>
-            <span className="md:hidden">Heatmap</span>
-            <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${showHazardHeatmap ? 'bg-black text-amber-300' : 'bg-amber-500/20 text-amber-300'}`}>
-              {showHazardHeatmap ? 'ON' : 'OFF'}
-            </span>
-          </button>
-
-          <div className="h-3.5 w-px bg-zinc-800 mx-0.5" />
-
-          {/* Primary Action Button: Cek Bandara & Kota (Direct trigger for RegionalImpactChecker) */}
-          <button
-            onClick={() => setActiveDrawer(activeDrawer === 'impact' ? null : 'impact')}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all border ${
-              activeDrawer === 'impact'
-                ? 'bg-amber-400 text-black border-amber-300 shadow-md shadow-amber-500/20'
-                : 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 border-amber-500/50 hover:from-amber-500/30 hover:to-orange-500/30 hover:text-white'
-            }`}
-            title="Cek evaluasi dampak erupsi ke Bandara Internasional (CGK, TKG), Pelabuhan, dan Kota-kota di Banten & Lampung"
-          >
-            <span>📍</span>
-            <span>Cek Bandara & Kota</span>
-          </button>
-
-          {/* Cuaca & Angin Quick Button */}
-          <button
-            onClick={() => setActiveDrawer(activeDrawer === 'weather' ? null : 'weather')}
-            className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-all border ${
-              activeDrawer === 'weather'
-                ? 'bg-sky-500 text-black border-sky-400 font-bold shadow-md'
-                : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:text-white hover:border-zinc-700'
-            }`}
-            title="Kondisi cuaca & angin real-time Gunung Anak Krakatau"
-          >
-            <Wind className="w-3.5 h-3.5 text-sky-400" />
-            <span className="font-mono text-white">{weather ? `${weather.wind.speedMs} m/s` : `${plume.windSpeed} m/s`}</span>
-          </button>
-
-          {/* Lapisan Peta & Kontrol Panel Button */}
-          <button
-            onClick={() => setActiveDrawer(activeDrawer && activeDrawer !== 'impact' && activeDrawer !== 'weather' ? null : 'layers')}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all border ${
-              activeDrawer && activeDrawer !== 'impact' && activeDrawer !== 'weather'
-                ? 'bg-zinc-200 text-black border-white font-bold'
-                : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:text-white hover:border-zinc-700'
-            }`}
-            title="Buka panel kendali lapisan peta dan analisis radius"
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Lapisan</span>
-          </button>
-        </div>
-      </div>
-
-      {/* RIGHT SLIDE-OUT DRAWER: Clean, Single Container (No Collisions!) */}
-      {activeDrawer && (
-        <div className="absolute top-16 right-3 bottom-16 w-80 sm:w-96 bg-black/95 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl z-25 flex flex-col pointer-events-auto overflow-hidden animate-in fade-in slide-in-from-right-2 duration-200">
-          {/* Drawer Navigation Tabs & Close */}
-          <div className="flex items-center justify-between border-b border-zinc-800 p-2 bg-zinc-950/80">
-            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-              <button
-                onClick={() => setActiveDrawer('impact')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                  activeDrawer === 'impact'
-                    ? 'bg-amber-400 text-black font-bold shadow'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                📍 Cek Dampak Wilayah
-              </button>
-              <button
-                onClick={() => setActiveDrawer('layers')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                  activeDrawer === 'layers'
-                    ? 'bg-zinc-800 text-white font-bold'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                🎛️ Lapisan
-              </button>
-              <button
-                onClick={() => setActiveDrawer('weather')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                  activeDrawer === 'weather'
-                    ? 'bg-sky-500 text-black font-bold shadow'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                🌤️ Cuaca
-              </button>
-              <button
-                onClick={() => setActiveDrawer('analysis')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                  activeDrawer === 'analysis'
-                    ? 'bg-zinc-800 text-white font-bold'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                📊 Radius
-              </button>
-              <button
-                onClick={() => setActiveDrawer('bmkg')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                  activeDrawer === 'bmkg'
-                    ? 'bg-zinc-800 text-white font-bold'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                🏛️ BMKG
-              </button>
-            </div>
-            <button
-              onClick={() => setActiveDrawer(null)}
-              className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors ml-1"
-              title="Tutup Panel"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Drawer Body with Vertical Scroll */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs text-zinc-200">
-            {/* TAB 0: REGIONAL IMPACT CHECKER (Airports, Ports, Cities ala abu.cikoytew.my.id) */}
-            {activeDrawer === 'impact' && (
-              <div className="space-y-3">
-                <RegionalImpactChecker
-                  plume={plume}
-                  forecastHours={Math.max(0, Math.round(simTimeMinutes / 60))}
-                  selectedFlightLevel={selectedFlightLevel}
-                  onFocusLocation={(coords, zoom) => {
-                    if (mapInstanceRef.current) {
-                      mapInstanceRef.current.flyTo(coords, zoom, { duration: 1.2 });
-                    }
-                  }}
-                  selectedLocationId={selectedLocationId}
-                />
-              </div>
-            )}
-
-            {/* TAB 1: LAPISAN PETA */}
-            {activeDrawer === 'layers' && (
-              <div className="space-y-3">
-                <div className="font-semibold text-zinc-200 flex items-center justify-between pb-1 border-b border-zinc-800">
-                  <span className="font-bold text-white text-[12px] flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-white" />
-                    Kendali Lapisan Visualisasi
-                  </span>
-                </div>
-
-                <div className="space-y-2">
-                  {/* SO2 Gas Satellite Plume Control */}
-                  <div className="p-2.5 rounded-xl bg-fuchsia-950/20 border border-fuchsia-500/30 space-y-2 mb-2">
-                    <label className="flex items-center justify-between cursor-pointer">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={showSo2Layer}
-                          onChange={(e) => setShowSo2Layer(e.target.checked)}
-                          className="rounded border-fuchsia-500/60 text-fuchsia-500 focus:ring-0"
-                        />
-                        <span className="text-fuchsia-300 font-bold flex items-center gap-1.5 text-xs">
-                          <span>🧪</span>
-                          <span>Citra Gas Belerang SO₂ (Sentinel-5P)</span>
-                        </span>
-                      </div>
-                      <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold ${
-                        showSo2Layer ? 'bg-fuchsia-500/30 text-fuchsia-200' : 'bg-zinc-800 text-zinc-500'
-                      }`}>
-                        {showSo2Layer ? 'AKTIF' : 'OFF'}
-                      </span>
-                    </label>
-                    <div className="text-[10px] text-zinc-400">
-                      Menampilkan konsentrasi gas sulfur dioksida (&gt;5, &gt;20, &gt;50 Dobson Units) pada koridor udara Selat Sunda.
-                    </div>
-                  </div>
-                  {/* Heatmap Overlay Layer Controls */}
-                  <div className="p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-2 mb-2">
-                    <label className="flex items-center justify-between cursor-pointer">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={showHazardHeatmap}
-                          onChange={(e) => setShowHazardHeatmap(e.target.checked)}
-                          className="rounded border-amber-500/60 text-amber-500 focus:ring-0"
-                        />
-                        <span className="text-amber-300 font-bold flex items-center gap-1.5 text-xs">
-                          <span>👥</span>
-                          <span>Heatmap Kepadatan & Bahaya Pesisir</span>
-                        </span>
-                      </div>
-                      <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold ${
-                        showHazardHeatmap ? 'bg-amber-500/30 text-amber-200' : 'bg-zinc-800 text-zinc-500'
-                      }`}>
-                        {showHazardHeatmap ? 'AKTIF' : 'OFF'}
-                      </span>
-                    </label>
-
-                    {showHazardHeatmap && (
-                      <div className="space-y-2 pt-1.5 border-t border-amber-500/20">
-                        <div className="text-[9.5px] text-zinc-400">Mode Analisis Peta Panas:</div>
-                        <div className="grid grid-cols-3 gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setHeatmapMode('composite')}
-                            className={`px-1.5 py-1 rounded text-[10px] font-medium border transition-colors ${
-                              heatmapMode === 'composite'
-                                ? 'bg-amber-500 text-black border-amber-400 font-bold'
-                                : 'bg-zinc-900 text-zinc-300 border-zinc-700 hover:text-white'
-                            }`}
-                          >
-                            🌋 Dampak Abu
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setHeatmapMode('population')}
-                            className={`px-1.5 py-1 rounded text-[10px] font-medium border transition-colors ${
-                              heatmapMode === 'population'
-                                ? 'bg-amber-500 text-black border-amber-400 font-bold'
-                                : 'bg-zinc-900 text-zinc-300 border-zinc-700 hover:text-white'
-                            }`}
-                          >
-                            👥 Populasi
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setHeatmapMode('coastal')}
-                            className={`px-1.5 py-1 rounded text-[10px] font-medium border transition-colors ${
-                              heatmapMode === 'coastal'
-                                ? 'bg-amber-500 text-black border-amber-400 font-bold'
-                                : 'bg-zinc-900 text-zinc-300 border-zinc-700 hover:text-white'
-                            }`}
-                          >
-                            🌊 Pesisir
-                          </button>
-                        </div>
-
-                        <div className="flex items-center justify-between text-[9.5px] text-zinc-400 pt-0.5">
-                          <span>Opasitas Lapisan:</span>
-                          <span className="font-mono text-amber-300">{Math.round(heatmapOpacity * 100)}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0.2"
-                          max="1.0"
-                          step="0.05"
-                          value={heatmapOpacity}
-                          onChange={(e) => setHeatmapOpacity(parseFloat(e.target.value))}
-                          className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showMaxBallisticRadius}
-                      onChange={(e) => setShowMaxBallisticRadius(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span className="text-amber-400 font-medium">💣 Radius Maksimal Bom (Amplop Bahaya)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showActiveTrajectory}
-                      onChange={(e) => setShowActiveTrajectory(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span className="text-white font-medium">🎯 Trayektori Peluru & Titik Benturan</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showUmbrellaCloud}
-                      onChange={(e) => setShowUmbrellaCloud(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span>☁️ Radius Payung Asap (Umbrella Cloud)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showAshPlumeCones}
-                      onChange={(e) => setShowAshPlumeCones(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span>💨 Konus Sebaran 3 Zona (Gaussian Plume)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showWindVector}
-                      onChange={(e) => setShowWindVector(e.target.checked)}
-                      className="rounded border-zinc-700 text-sky-400 focus:ring-0"
-                    />
-                    <span className="text-sky-300">🌬️ Vektor Angin Real-Time (Arah & Kecepatan)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showKRBZones}
-                      onChange={(e) => setShowKRBZones(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span>🛡️ Batas Steril 5 km (KRB III PVMBG)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showRadiusLabels}
-                      onChange={(e) => setShowRadiusLabels(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span>📏 Label Jarak & Metrik Fisika</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showIsochrones}
-                      onChange={(e) => setShowIsochrones(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span>⏱️ Isokron Garis Waktu Erupsi (15m, 30m, 1j)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showLandmarks}
-                      onChange={(e) => setShowLandmarks(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span>📍 Landmark Geografis (Pulau, Pesisir, Selat)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showShipping}
-                      onChange={(e) => setShowShipping(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span>🚢 Koridor Pelayaran Internasional (ALKI I)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showBmkgAshDeposit}
-                      onChange={(e) => setShowBmkgAshDeposit(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span className="text-zinc-300">🌋 Kontur Hujan Abu (Isopach BMKG)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={showBmkgSigmet}
-                      onChange={(e) => setShowBmkgSigmet(e.target.checked)}
-                      className="rounded border-zinc-700 text-white focus:ring-0"
-                    />
-                    <span className="text-zinc-300">📋 Poligon SIGMET ICAO BMKG</span>
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: ANALISIS RADIUS BAHAYA ERUPSI */}
-            {activeDrawer === 'analysis' && (
-              <div className="space-y-3">
-                <div className="font-semibold text-zinc-200 flex items-center justify-between pb-1 border-b border-zinc-800">
-                  <span className="font-bold text-white text-[12px] flex items-center gap-1.5">
-                    <Flame className="w-4 h-4 text-white" />
-                    Analisis Radius Erupsi Real-Time
-                  </span>
-                </div>
-
-                {/* Section A: Ballistic */}
-                <div className="p-2.5 rounded-xl bg-zinc-900/90 border border-amber-500/30 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-amber-400 text-xs flex items-center gap-1.5">
-                      <span>💣</span> Radius Lemparan Bom {radiusMetrics.ballisticShower.length > 1 ? `(${radiusMetrics.ballisticShower.length} Bom)` : 'Vulkanik'}
-                    </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
-                      {radiusMetrics.ballisticShower.length > 1 ? `${radiusMetrics.dispersionMode === 'radial' ? 'Pancaran Radial 360°' : 'Hujan Terarah'}` : 'RK4 Drag'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800">
-                      <span className="text-[9px] text-zinc-400 block font-sans">Jangkauan Amplop Maks</span>
-                      <span className="text-base font-bold text-amber-400">
-                        {radiusMetrics.maxBallisticKm.toFixed(2)} km
-                      </span>
-                    </div>
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800">
-                      <span className="text-[9px] text-zinc-400 block font-sans">
-                        {radiusMetrics.ballisticShower.length > 1 ? 'Rentang Benturan Shower' : 'Jarak Jatuh Aktif'}
-                      </span>
-                      <span className="text-base font-bold text-white">
-                        {radiusMetrics.ballisticShower.length > 1
-                          ? `${radiusMetrics.showerMinDistKm.toFixed(1)} – ${radiusMetrics.showerMaxDistKm.toFixed(1)} km`
-                          : `${radiusMetrics.activeDistanceKm.toFixed(2)} km`}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1 text-[10px] font-mono text-zinc-300 pt-1 border-t border-zinc-800">
-                    <div className="flex justify-between">
-                      <span className="text-zinc-400">Kecepatan Lontar (v₀):</span>
-                      <strong className="text-white">{ballistic.initialVelocity} m/s ({(ballistic.initialVelocity * 3.6).toFixed(0)} km/j)</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-400">Sudut Elevasi / Azimut:</span>
-                      <strong className="text-white">{ballistic.launchAngle}° / {ballistic.launchAzimuth ?? 90}°</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-400">Diameter & Massa Batu Utama:</span>
-                      <strong className="text-white">{(ballistic.rockDiameter * 100).toFixed(0)} cm • {rockMassKg.toFixed(0)} kg</strong>
-                    </div>
-                    {radiusMetrics.ballisticShower.length > 1 && (
-                      <div className="flex justify-between text-amber-300 pt-0.5 border-t border-zinc-800/60">
-                        <span>Total Energi Kinetik Shower:</span>
-                        <strong>{radiusMetrics.showerTotalEnergyMJ.toFixed(2)} MJ</strong>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Section B: Smoke & Ash */}
-                <div className="p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-750 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-white text-xs flex items-center gap-1.5">
-                      <span>💨</span> Radius Sebaran Asap & Abu
-                    </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-200 font-bold">
-                      Gaussian Plume
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800">
-                      <span className="text-[9px] text-zinc-400 block font-sans">Jangkauan Terjauh</span>
-                      <span className="text-base font-bold text-white">
-                        {radiusMetrics.maxPlumeReachKm.toFixed(1)} km
-                      </span>
-                    </div>
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800">
-                      <span className="text-[9px] text-zinc-400 block font-sans">Radius Payung Kawah</span>
-                      <span className="text-base font-bold text-zinc-300">
-                        {radiusMetrics.umbrellaRadiusKm.toFixed(2)} km
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1 text-[10px] font-mono pt-1 border-t border-zinc-800">
-                    <div className="flex justify-between items-center text-zinc-300">
-                      <span className="text-zinc-400">Zona I (Pekat/Lapili):</span>
-                      <strong>0 – {radiusMetrics.zone1ReachKm.toFixed(1)} km</strong>
-                    </div>
-                    <div className="flex justify-between items-center text-zinc-300">
-                      <span className="text-zinc-400">Zona II (Sedang):</span>
-                      <strong>{radiusMetrics.zone1ReachKm.toFixed(1)} – {radiusMetrics.zone2ReachKm.toFixed(1)} km</strong>
-                    </div>
-                    <div className="flex justify-between items-center text-zinc-300">
-                      <span className="text-zinc-400">Zona III (Abu Halus):</span>
-                      <strong>{radiusMetrics.zone2ReachKm.toFixed(1)} – {radiusMetrics.zone3ReachKm.toFixed(1)} km</strong>
-                    </div>
-                    <div className="flex justify-between pt-1 text-[9px] text-zinc-400 font-sans">
-                      <span>Arah Angin:</span>
-                      <strong className="text-white font-mono">{radiusMetrics.driftAngleDeg}° ({plume.windSpeed} m/s)</strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section C: Impacted Areas */}
-                <div className="p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 space-y-1.5">
-                  <span className="text-[10px] font-bold text-zinc-400 block uppercase font-mono">
-                    Wilayah Terdampak Radius:
-                  </span>
-                  <div className="space-y-1 text-[10px] font-mono max-h-32 overflow-y-auto no-scrollbar">
-                    {radiusMetrics.impactedList.map((lm) => (
-                      <div
-                        key={lm.id}
-                        className="flex items-center justify-between p-1.5 rounded bg-zinc-950/70 border border-zinc-850"
-                      >
-                        <span className="text-zinc-200">{lm.name} ({lm.distKm} km)</span>
-                        <div className="flex items-center gap-1">
-                          {lm.inBallistic && (
-                            <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded text-[9px]">
-                              Bom
-                            </span>
-                          )}
-                          {lm.inPlume && (
-                            <span className="px-1.5 py-0.2 bg-zinc-800 text-white rounded text-[9px]">
-                              Abu
-                            </span>
-                          )}
-                          {!lm.inBallistic && !lm.inPlume && (
-                            <span className="text-zinc-500 text-[9px]">Aman</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Modal Detail Telemetry Triggers */}
-                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-zinc-800">
-                  <button
-                    onClick={() => setIsEjectaModalOpen(true)}
-                    className="p-2 rounded-xl text-[10.5px] font-semibold flex items-center justify-center gap-1.5 transition-all border border-amber-500/40 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 hover:text-white"
-                    title="Buka Telemetri & Trayektori Lengkap Lemparan Bom"
-                  >
-                    <span>💥</span>
-                    <span>Telemetri Bom</span>
-                  </button>
-                  <button
-                    onClick={() => setIsDetailModalOpen(true)}
-                    className="p-2 rounded-xl text-[10.5px] font-semibold flex items-center justify-center gap-1.5 transition-all border border-purple-500/40 bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 hover:text-white"
-                    title="Buka Matriks Sebaran Abu & Estimasi Isopach"
-                  >
-                    <span>☁️</span>
-                    <span>Matriks Abu</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 3: SKENARIO BMKG */}
-            {activeDrawer === 'bmkg' && (
-              <div className="space-y-3">
-                <div className="font-semibold text-zinc-200 flex items-center justify-between pb-1 border-b border-zinc-800">
-                  <span className="font-bold text-white text-[12px] flex items-center gap-1.5">
-                    <Radio className="w-4 h-4 text-white" />
-                    Pusat Data BMKG & SIGMET
-                  </span>
-                </div>
-
-                {/* Scenario Select */}
-                <div className="space-y-1">
-                  <span className="text-zinc-400 text-[10px] font-sans block">Pilih Skenario BMKG:</span>
-                  <div className="space-y-1">
-                    {BMKG_SIGMET_SCENARIOS.map((scenario) => {
-                      const isActive = activeBmkgScenarioId === scenario.id;
-                      return (
-                        <button
-                          key={scenario.id}
-                          onClick={() => handleApplyBmkgScenario(scenario)}
-                          className={`w-full text-left px-2.5 py-2 rounded-xl text-[11px] font-mono transition-all border flex items-center justify-between ${
-                            isActive
-                              ? 'bg-white text-black font-bold border-white shadow-md'
-                              : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:text-white hover:bg-zinc-850'
-                          }`}
-                        >
-                          <span>{scenario.title.split(' (')[0]}</span>
-                          <span className="text-[10px] opacity-75">{scenario.driftDirectionDeg}° / {scenario.windSpeedMs} m/s</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 10 Affected Areas ETA */}
-                <div className="p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 space-y-1.5">
-                  <span className="text-[10px] font-bold text-zinc-400 block uppercase font-mono">
-                    10 Daerah Terdampak BMKG (ETA):
-                  </span>
-                  <div className="space-y-1 text-[10px] font-mono max-h-48 overflow-y-auto no-scrollbar">
-                    {radiusMetrics.bmkgImpactedAreas.map((area) => (
-                      <div
-                        key={area.id}
-                        className={`flex items-center justify-between p-1.5 rounded transition-colors ${
-                          area.hasAshArrived
-                            ? 'bg-red-950/40 text-white border border-red-900/50'
-                            : area.inPlume
-                            ? 'bg-amber-950/30 text-zinc-200 border border-amber-900/40'
-                            : 'bg-zinc-950/50 text-zinc-400'
-                        }`}
-                      >
-                        <button
-                          onClick={() => handleFlyTo(area.coords, 12)}
-                          className="hover:text-white underline truncate text-left font-sans text-[11px]"
-                        >
-                          {area.name.split(' (')[0]}
-                        </button>
-                        <span className="text-[9px] font-mono">
-                          {area.hasAshArrived ? '🚨 Terpapar' : area.inPlume ? `⏳ ${area.etaMinutes}m` : '✓ Aman'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setIsBmkgModalOpen(true)}
-                  className="w-full py-2 px-3 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-lg"
-                >
-                  <Radio className="w-3.5 h-3.5 text-black" />
-                  <span>Buka Buletin Lengkap & Sounding</span>
-                </button>
-
-                <button
-                  onClick={() => setIsDetailModalOpen(true)}
-                  className="w-full py-1.5 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-colors border border-zinc-750"
-                >
-                  <FileText className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Detail Panduan Mitigasi Abu</span>
-                </button>
-              </div>
-            )}
-
-            {/* TAB 4: CUACA & ANGIN REAL-TIME */}
-            {activeDrawer === 'weather' && (
-              <div className="space-y-3">
-                <WeatherWidget
-                  weather={weather || null}
-                  isLoading={Boolean(isLoadingWeather)}
-                  onRefresh={onRefreshWeather || (() => {})}
-                  onApplyWind={(speed, dir) => onUpdateWind && onUpdateWind(speed, dir)}
-                  currentSimWindSpeed={plume.windSpeed}
-                  currentSimWindDirection={plume.windDirection}
-                  isAutoSync={isAutoSyncWeather}
-                  onToggleAutoSync={onToggleAutoSyncWeather}
-                  variant="drawer"
-                />
-
-                {onOpenWeatherModal && (
-                  <button
-                    onClick={onOpenWeatherModal}
-                    className="w-full py-2 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors border border-zinc-750 shadow-sm"
-                  >
-                    <Wind className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Buka Sounding Lengkap & Prediksi 24 Jam</span>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* BOTTOM CENTER: Dedicated Animation & Simulation Dock (No Collisions!) */}
-      <div className="absolute bottom-3 left-3 right-3 sm:left-1/2 sm:-translate-x-1/2 sm:w-[94%] sm:max-w-4xl z-20 pointer-events-auto">
-        <div className="bg-black/95 backdrop-blur-2xl border border-zinc-800 rounded-2xl p-3 shadow-2xl space-y-2.5 transition-all text-xs">
-          {/* Top Bar of Dock: Animation Selection Tabs & Option Toggles */}
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-850 pb-2">
-            {/* Left: Tab Switchers for Ballistic vs Smoke Animation */}
-            <div className="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800">
-              <button
-                onClick={() => setActiveAnimTab('ballistic')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeAnimTab === 'ballistic'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <span>💣 Animasi Lemparan Batu</span>
-                <span
-                  className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ${
-                    showBallisticAnim ? 'bg-amber-400 text-black' : 'bg-zinc-800 text-zinc-500'
-                  }`}
-                >
-                  {showBallisticAnim ? 'AKTIF' : 'NONAKTIF'}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveAnimTab('smoke')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeAnimTab === 'smoke'
-                    ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <span>💨 Animasi Asap Vulkanik</span>
-                <span
-                  className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ${
-                    showSmokeAnim ? 'bg-white text-black' : 'bg-zinc-800 text-zinc-500'
-                  }`}
-                >
-                  {showSmokeAnim ? 'AKTIF' : 'NONAKTIF'}
-                </span>
-              </button>
-            </div>
-
-            {/* Right: Quick On/Off toggle for currently active tab */}
-            <div className="flex items-center gap-2">
-              {activeAnimTab === 'ballistic' ? (
-                <button
-                  onClick={() => {
-                    const next = !showBallisticAnim;
-                    setShowBallisticAnim(next);
-                    if (next) setIsBallisticPlaying(true);
-                    else setIsBallisticPlaying(false);
-                  }}
-                  className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all border shadow-sm ${
-                    showBallisticAnim
-                      ? 'bg-amber-500 hover:bg-amber-400 text-black border-amber-400'
-                      : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-750'
-                  }`}
-                >
-                  <span>{showBallisticAnim ? 'Matikan Animasi Batu' : 'Nyalakan Animasi Batu'}</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => {
-                    const next = !showSmokeAnim;
-                    setShowSmokeAnim(next);
-                    if (next) setIsSmokePlaying(true);
-                    else setIsSmokePlaying(false);
-                  }}
-                  className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all border shadow-sm ${
-                    showSmokeAnim
-                      ? 'bg-white hover:bg-zinc-200 text-black border-white'
-                      : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-750'
-                  }`}
-                >
-                  <span>{showSmokeAnim ? 'Matikan Animasi Asap' : 'Nyalakan Animasi Asap'}</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* TAB 1 CONTENT: BALLISTIC ANIMATION CONTROLS */}
-          {activeAnimTab === 'ballistic' && (
-            <div className="space-y-2.5">
-              {!showBallisticAnim ? (
-                <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 text-center space-y-2">
-                  <p className="text-zinc-300 text-xs font-medium">
-                    Opsi melihat animasi lemparan batu sedang nonaktif. Nyalakan untuk melihat pergerakan proyektil batu pijar secara dinamis di peta satelit.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setShowBallisticAnim(true);
-                      setIsBallisticPlaying(true);
-                    }}
-                    className="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-colors shadow-md inline-flex items-center gap-1.5"
-                  >
-                    <span>Aktifkan Animasi Lemparan Batu</span>
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {/* Playback Controls & Speed */}
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => {
-                          setBallisticTime(0);
-                          setIsBallisticPlaying(true);
-                        }}
-                        className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs transition-colors"
-                        title="Ulangi dari Kawah (t = 0)"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => setIsBallisticPlaying(!isBallisticPlaying)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border shadow ${
-                          isBallisticPlaying
-                            ? 'bg-amber-400 text-black border-amber-300 hover:bg-amber-300'
-                            : 'bg-zinc-850 text-white border-zinc-700 hover:bg-zinc-750'
-                        }`}
-                      >
-                        {isBallisticPlaying ? (
-                          <>
-                            <Pause className="w-3.5 h-3.5 fill-current" />
-                            <span>Jeda</span>
-                          </>
-                        ) : (
-                          <>
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                            <span>{isBallisticLanded ? 'Ulangi Lemparan' : 'Putar'}</span>
-                          </>
-                        )}
-                      </button>
-
-                      <div className="flex items-center bg-zinc-900 rounded-lg p-0.5 border border-zinc-800">
-                        {[0.5, 1.0, 2.0, 4.0].map((spd) => (
-                          <button
-                            key={spd}
-                            onClick={() => setBallisticSpeed(spd)}
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
-                              ballisticSpeed === spd
-                                ? 'bg-amber-500 text-black font-bold'
-                                : 'text-zinc-400 hover:text-zinc-200'
-                            }`}
-                          >
-                            {spd}x
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Quick Telemetry readout */}
-                    <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-300">
-                      <span>Waktu Terbang: <strong className="text-white">{ballisticTime.toFixed(1)}s</strong> / {totalFlightTime.toFixed(1)}s</span>
-                      <span className="text-zinc-600">|</span>
-                      <span>Tinggi Bom Utama: <strong className="text-amber-400">{currentBallisticPt.y.toFixed(0)}m</strong></span>
-                      <span className="text-zinc-600">|</span>
-                      {radiusMetrics.ballisticShower.length > 1 ? (
-                        <span>Status: <strong className="text-orange-400">{radiusMetrics.ballisticShower.filter((b) => ballisticTime >= b.traj.flightTime).length} / {radiusMetrics.ballisticShower.length} Mendarat</strong></span>
-                      ) : (
-                        <span>Jarak: <strong className="text-white">{ballisticDistKm.toFixed(2)} km</strong></span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Scrubber Range */}
-                  <div className="space-y-1">
-                    <input
-                      type="range"
-                      min={0}
-                      max={totalFlightTime}
-                      step={0.05}
-                      value={ballisticTime}
-                      onChange={(e) => {
-                        setBallisticTime(Number(e.target.value));
-                        setIsBallisticPlaying(false);
-                      }}
-                      className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                    />
-                    <div className="flex justify-between text-[10px] font-mono text-zinc-400">
-                      <span>🌋 Kawah Krakatau (0s)</span>
-                      <span className="text-white font-bold">
-                        {radiusMetrics.ballisticShower.length > 1
-                          ? `${radiusMetrics.ballisticShower.filter((b) => ballisticTime >= b.traj.flightTime).length} proyektil telah membentur permukaan`
-                          : (isBallisticLanded ? '💥 Benturan di Titik Jatuh!' : `Kecepatan: ${currentBallisticPt.speed.toFixed(0)} m/s`)}
-                      </span>
-                      <span>Semua Mendarat ({totalFlightTime.toFixed(1)}s)</span>
-                    </div>
-                  </div>
-
-                  {/* Multi-Projectile Quick Selector & Catalog Detail Button */}
-                  <div className="pt-2 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="text-zinc-400 text-[11px]">Jumlah Bom:</span>
-                      {[
-                        { count: 1, label: '1 Batu' },
-                        { count: 6, label: '6 Bom (Pancaran)' },
-                        { count: 12, label: '12 Bom (Shower Masif)' },
-                      ].map((item) => (
-                        <button
-                          key={item.count}
-                          type="button"
-                          onClick={() => {
-                            if (onUpdateBallistic) {
-                              onUpdateBallistic({ projectileCount: item.count });
-                            }
-                            setBallisticTime(0);
-                            setIsBallisticPlaying(true);
-                          }}
-                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors border ${
-                            (ballistic.projectileCount ?? 1) === item.count
-                              ? 'bg-amber-500 text-black font-bold border-amber-400 shadow-sm'
-                              : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
-                          }`}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-
-                      {onUpdateBallistic && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nextMode = ballistic.dispersionMode === 'radial' ? 'focused' : 'radial';
-                            onUpdateBallistic({ dispersionMode: nextMode });
-                            setBallisticTime(0);
-                            setIsBallisticPlaying(true);
-                          }}
-                          className="px-2 py-0.5 rounded text-[10px] font-medium bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors"
-                          title="Ganti mode sebaran sudut lontaran (Kerucut Arah vs Radial 360°)"
-                        >
-                          Mode: <strong className="text-amber-400">{ballistic.dispersionMode === 'radial' ? 'Radial 360°' : 'Kerucut Sektoral'}</strong>
-                        </button>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setIsEjectaModalOpen(true)}
-                      className="px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-white border border-amber-500/40 font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
-                      title="Buka Telemetri Lengkap & Katalog Fragmen Batuan"
-                    >
-                      <span>💥</span>
-                      <span>Katalog & Detail Lemparan Bom</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2 CONTENT: SMOKE & ASH ANIMATION CONTROLS */}
-          {activeAnimTab === 'smoke' && (
-            <div className="space-y-2.5">
-              {!showSmokeAnim ? (
-                <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 text-center space-y-2">
-                  <p className="text-zinc-300 text-xs font-medium">
-                    Opsi melihat animasi asap vulkanik sedang nonaktif. Nyalakan untuk mensimulasikan ekspansi awan abu, payung kawah, dan jangkauan wilayah terdampak pasca erupsi secara dinamis.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setShowSmokeAnim(true);
-                      setIsSmokePlaying(true);
-                    }}
-                    className="px-4 py-1.5 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition-colors shadow-md inline-flex items-center gap-1.5"
-                  >
-                    <span>Aktifkan Animasi Asap Vulkanik</span>
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {/* Playback Controls & Speed */}
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => setSimTimeMinutes(0)}
-                        title="Reset ke Momen Erupsi (T+0)"
-                        className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs transition-colors"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => setSimTimeMinutes((prev) => Math.max(0, prev - 15))}
-                        title="Mundur 15 Menit"
-                        className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs transition-colors"
-                      >
-                        <SkipBack className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => setIsSmokePlaying(!isSmokePlaying)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border shadow ${
-                          isSmokePlaying
-                            ? 'bg-white text-black border-white hover:bg-zinc-200'
-                            : 'bg-zinc-850 text-white border-zinc-700 hover:bg-zinc-750'
-                        }`}
-                      >
-                        {isSmokePlaying ? (
-                          <>
-                            <Pause className="w-3.5 h-3.5 fill-current" />
-                            <span>Jeda Simulasi</span>
-                          </>
-                        ) : (
-                          <>
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                            <span>Putar Simulasi</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        onClick={() => setSimTimeMinutes((prev) => Math.min(1080, prev + 30))}
-                        title="Maju 30 Menit"
-                        className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs transition-colors"
-                      >
-                        <SkipForward className="w-3.5 h-3.5" />
-                      </button>
-
-                      <div className="flex items-center bg-zinc-900 rounded-lg p-0.5 border border-zinc-800">
-                        {[1, 5, 15, 30, 60].map((spd) => (
-                          <button
-                            key={spd}
-                            onClick={() => setSimSpeed(spd)}
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
-                              simSpeed === spd
-                                ? 'bg-zinc-700 text-white font-bold'
-                                : 'text-zinc-400 hover:text-zinc-200'
-                            }`}
-                          >
-                            {spd}x
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-300">
-                      <span>Waktu: <strong className="text-white">{simTimeDisplay}</strong></span>
-                      <span className="text-zinc-600">|</span>
-                      <span>Garis Depan: <strong className="text-white">{simCurrentFrontKm} km</strong></span>
-                      <span className="text-zinc-600">|</span>
-                      <span>Arah: <strong className="text-white">{radiusMetrics.driftAngleDeg}°</strong></span>
-                    </div>
-                  </div>
-
-                  {/* Scrubber Range & 18-Hour Milestones (Inspirasi abu.cikoytew.my.id) */}
-                  <div className="space-y-1">
-                    <input
-                      type="range"
-                      min={0}
-                      max={1080}
-                      step={1}
-                      value={simTimeMinutes}
-                      onChange={(e) => {
-                        setSimTimeMinutes(Number(e.target.value));
-                        setIsSmokePlaying(false);
-                      }}
-                      className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-white hover:accent-zinc-200"
-                    />
-                    <div className="flex items-center justify-between gap-1 overflow-x-auto no-scrollbar pt-0.5">
-                      {[
-                        { min: 0, label: 'T+0 (Kawah)' },
-                        { min: 30, label: 'T+30m (P. Sebesi)' },
-                        { min: 60, label: 'T+1J (ALKI I)' },
-                        { min: 180, label: 'T+3J (Pesisir Anyer/Kalianda)' },
-                        { min: 360, label: 'T+6J (Pelabuhan Merak/Bakauheni)' },
-                        { min: 720, label: 'T+12J (Bandara Soekarno-Hatta)' },
-                        { min: 1080, label: 'T+18J (Batas Prediksi Maksimal)' },
-                      ].map((pill) => (
-                        <button
-                          key={pill.min}
-                          onClick={() => setSimTimeMinutes(pill.min)}
-                          className={`px-2 py-0.5 rounded text-[9px] font-mono whitespace-nowrap transition-colors border ${
-                            Math.abs(simTimeMinutes - pill.min) <= 15
-                              ? 'bg-zinc-800 text-white border-zinc-600 font-bold'
-                              : 'bg-zinc-950/60 text-zinc-400 border-zinc-850 hover:bg-zinc-900 hover:text-zinc-200'
-                          }`}
-                        >
-                          {pill.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Sub-tabs for detailed info */}
-                  <div className="pt-2 border-t border-zinc-850 space-y-2">
-                    <div className="flex items-center justify-between border-b border-zinc-850 pb-1 text-[11px]">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => setActiveSimTab('timeline')}
-                          className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                            activeSimTab === 'timeline'
-                              ? 'bg-zinc-800 text-white border border-zinc-700'
-                              : 'text-zinc-400 hover:text-zinc-200'
-                          }`}
-                        >
-                          📊 Telemetri Sebaran Abu
-                        </button>
-                        <button
-                          onClick={() => setActiveSimTab('eta')}
-                          className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                            activeSimTab === 'eta'
-                              ? 'bg-zinc-800 text-white border border-zinc-700'
-                              : 'text-zinc-400 hover:text-zinc-200'
-                          }`}
-                        >
-                          ⏱️ Estimasi Waktu Tiba (ETA)
-                        </button>
-                        <button
-                          onClick={() => setActiveSimTab('deposit')}
-                          className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                            activeSimTab === 'deposit'
-                              ? 'bg-zinc-800 text-white border border-zinc-700'
-                              : 'text-zinc-400 hover:text-zinc-200'
-                          }`}
-                        >
-                          🌋 Ketebalan Endapan
-                        </button>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsDetailModalOpen(true)}
-                        className="px-2.5 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-white border border-purple-500/40 font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
-                        title="Buka Matriks Sebaran Abu & Estimasi Ketebalan Isopach"
-                      >
-                        <span>☁️</span>
-                        <span>Detail Sebaran Abu & Isopach</span>
-                      </button>
-                    </div>
-
-                    {/* Subtab 1: Telemetry */}
-                    {activeSimTab === 'timeline' && (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
-                        <div className="p-2 rounded-xl bg-zinc-900/80 border border-zinc-850">
-                          <span className="text-zinc-400 block text-[9px]">Garis Depan Awan:</span>
-                          <strong className="text-white text-xs block mt-0.5">{simCurrentFrontKm} km</strong>
-                          <span className="text-zinc-400 text-[9px]">Arah {radiusMetrics.driftAngleDeg}°</span>
-                        </div>
-                        <div className="p-2 rounded-xl bg-zinc-900/80 border border-zinc-850">
-                          <span className="text-zinc-400 block text-[9px]">Radius Payung:</span>
-                          <strong className="text-white text-xs block mt-0.5">{simCurrentUmbrellaKm} km</strong>
-                          <span className="text-zinc-400 text-[9px]">NBL Level</span>
-                        </div>
-                        <div className="p-2 rounded-xl bg-zinc-900/80 border border-zinc-850">
-                          <span className="text-zinc-400 block text-[9px]">Kecepatan Angin:</span>
-                          <strong className="text-white text-xs block mt-0.5">{simWindKmh} km/j</strong>
-                          <span className="text-zinc-400 text-[9px]">{plume.windSpeed} m/s</span>
-                        </div>
-                        <div className="p-2 rounded-xl bg-zinc-900/80 border border-zinc-850">
-                          <span className="text-zinc-400 block text-[9px]">Status Terpapar:</span>
-                          <strong className="text-amber-400 text-xs block mt-0.5">
-                            {simCoveredLandmarks.length} Wilayah
-                          </strong>
-                          <span className="text-zinc-400 text-[9px]">
-                            {simCoveredLandmarks.length > 0
-                              ? simCoveredLandmarks[simCoveredLandmarks.length - 1].name
-                              : 'Area Kawah'}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Subtab 2: ETA */}
-                    {activeSimTab === 'eta' && (
-                      <div className="space-y-1.5 max-h-36 overflow-y-auto no-scrollbar font-mono text-[10px]">
-                        {radiusMetrics.bmkgImpactedAreas.map((area) => (
-                          <div
-                            key={area.id}
-                            className={`flex items-center justify-between p-1.5 rounded-lg border ${
-                              area.hasAshArrived
-                                ? 'bg-red-950/40 border-red-900/50 text-white font-bold'
-                                : area.inPlume
-                                ? 'bg-amber-950/30 border-amber-900/40 text-zinc-200'
-                                : 'bg-zinc-900/50 border-zinc-850 text-zinc-400'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span>{area.name}</span>
-                              <span className="text-zinc-500 font-sans text-[9px]">{area.distKm} km ({area.bearingDeg}°)</span>
-                            </div>
-                            <span className="font-bold">
-                              {area.hasAshArrived
-                                ? '🚨 Telah Tiba'
-                                : area.inPlume
-                                ? `⏳ ETA: T+${area.etaMinutes}m`
-                                : '✓ Di Luar Lintasan'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Subtab 3: Deposit */}
-                    {activeSimTab === 'deposit' && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
-                        <div className="p-2 rounded-xl bg-zinc-900/80 border border-zinc-850 space-y-0.5">
-                          <span className="font-bold text-white block">Zona I (&gt;50 mm) - Sangat Tebal</span>
-                          <p className="text-zinc-400 text-[9px] font-sans">
-                            Pulau Rakata, Sertung, Panjang & kaldera. Kerusakan struktural, hujan lapili berat.
-                          </p>
-                        </div>
-                        <div className="p-2 rounded-xl bg-zinc-900/80 border border-zinc-850 space-y-0.5">
-                          <span className="font-bold text-white block">Zona II (10–50 mm) - Tebal</span>
-                          <p className="text-zinc-400 text-[9px] font-sans">
-                            Pulau Sebesi & ALKI I. Gangguan navigasi laut dan mesin kapal.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Interactive Population Density & Coastal Hazard Heatmap Floating Widget */}
-      {showHazardHeatmap && (
-        <HazardHeatmapWidget
-          isVisible={showHazardHeatmap}
-          onToggleVisible={setShowHazardHeatmap}
-          mode={heatmapMode}
-          onChangeMode={setHeatmapMode}
-          opacity={heatmapOpacity}
-          onChangeOpacity={setHeatmapOpacity}
-          nodes={COASTAL_HAZARD_NODES}
-          plume={plume}
-          onSelectNode={(node) => {
-            setSelectedHeatNodeId(node.id);
-            if (mapInstanceRef.current) {
-              mapInstanceRef.current.flyTo(node.coords, 12, { duration: 1.2 });
-            }
-          }}
-          selectedNodeId={selectedHeatNodeId}
-        />
-      )}
-
-      {/* Volcanic Ejecta & Ballistic Bombs Detail Modal */}
-      <VolcanicEjectaDetailModal
-        isOpen={isEjectaModalOpen}
-        onClose={() => setIsEjectaModalOpen(false)}
+      {/* 1. TOP UNIFIED BAR: Clean, responsive, non-overlapping controls */}
+      <MapTopBar
+        selectedTile={selectedTile}
+        setSelectedTile={setSelectedTile}
+        isBasemapOpen={isBasemapOpen}
+        setIsBasemapOpen={setIsBasemapOpen}
+        activeBmkgScenarioId={activeBmkgScenarioId}
+        onSelectBmkgScenario={handleApplyBmkgScenario}
+        onOpenBmkgModal={() => setIsBmkgModalOpen(true)}
+        isCameraOpen={isCameraOpen}
+        setIsCameraOpen={setIsCameraOpen}
+        onFlyTo={handleFlyTo}
+        isLayersOpen={isLayersOpen}
+        setIsLayersOpen={setIsLayersOpen}
+        activeLayersCount={activeLayersCount}
+        showMaxBallisticRadius={showMaxBallisticRadius}
+        setShowMaxBallisticRadius={setShowMaxBallisticRadius}
+        showActiveTrajectory={showActiveTrajectory}
+        setShowActiveTrajectory={setShowActiveTrajectory}
+        showKRBZones={showKRBZones}
+        setShowKRBZones={setShowKRBZones}
+        showUmbrellaCloud={showUmbrellaCloud}
+        setShowUmbrellaCloud={setShowUmbrellaCloud}
+        showAshPlumeCones={showAshPlumeCones}
+        setShowAshPlumeCones={setShowAshPlumeCones}
+        showIsochrones={showIsochrones}
+        setShowIsochrones={setShowIsochrones}
+        showAshPuffs={showAshPuffs}
+        setShowAshPuffs={setShowAshPuffs}
+        showBmkgSigmet={showBmkgSigmet}
+        setShowBmkgSigmet={setShowBmkgSigmet}
+        showBmkgAshDeposit={showBmkgAshDeposit}
+        setShowBmkgAshDeposit={setShowBmkgAshDeposit}
+        showLandmarks={showLandmarks}
+        setShowLandmarks={setShowLandmarks}
+        showShipping={showShipping}
+        setShowShipping={setShowShipping}
+        showRadiusLabels={showRadiusLabels}
+        setShowRadiusLabels={setShowRadiusLabels}
+        onOpenDetailModal={() => setIsDetailModalOpen(true)}
+        showOverviewCard={showOverviewCard}
+        setShowOverviewCard={setShowOverviewCard}
+        maxBallisticKm={radiusMetrics.maxBallisticKm}
+      />
+
+      {/* 2. RIGHT DRAWER: Hazard analysis, landmarks, geodesic measurements */}
+      <MapAnalysisDrawer
+        isOpen={showOverviewCard}
+        onClose={() => setShowOverviewCard(false)}
+        radiusMetrics={radiusMetrics}
+        plume={plume}
         ballistic={ballistic}
+        cursorInfo={cursorInfo}
+      />
+
+      {/* 3. BOTTOM DOCK: Clean, non-intrusive post-eruption ash simulation player */}
+      <MapSimulationDock
+        isPlaying={isPlaying}
+        setIsPlaying={setIsPlaying}
+        simTimeMinutes={simTimeMinutes}
+        setSimTimeMinutes={setSimTimeMinutes}
+        playbackSpeed={simSpeed}
+        setPlaybackSpeed={setSimSpeed}
+        simCurrentFrontKm={simCurrentFrontKm}
+        simCurrentUmbrellaKm={simCurrentUmbrellaKm}
+        simCoveredLandmarks={simCoveredLandmarks}
+        onOpenDetailModal={() => setIsDetailModalOpen(true)}
+        onOpenBmkgModal={() => setIsBmkgModalOpen(true)}
+        simHours={simHours}
+        simMins={simMins}
+        activeBmkgScenario={BMKG_SIGMET_SCENARIOS.find((s) => s.id === activeBmkgScenarioId)}
         plume={plume}
       />
 

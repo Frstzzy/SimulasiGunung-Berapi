@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { BallisticParams, PlumeParams, KrakatauWeather } from '../types';
+import { BallisticParams, PlumeParams } from '../types';
 import { Sliders, Flame, Wind, ToggleLeft, ToggleRight, Sparkles, Compass } from 'lucide-react';
 
 interface ControlPanelProps {
@@ -13,10 +13,6 @@ interface ControlPanelProps {
   onUpdateBallistic: (partial: Partial<BallisticParams>) => void;
   onUpdatePlume: (partial: Partial<PlumeParams>) => void;
   onTriggerEruption: () => void;
-  weather?: KrakatauWeather | null;
-  onOpenWeatherModal?: () => void;
-  onOpenEjectaDetail?: () => void;
-  onOpenAshDetail?: () => void;
 }
 
 const COMPASS_POINTS: { [key: number]: string } = {
@@ -45,10 +41,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onUpdateBallistic,
   onUpdatePlume,
   onTriggerEruption,
-  weather,
-  onOpenWeatherModal,
-  onOpenEjectaDetail,
-  onOpenAshDetail,
 }) => {
   return (
     <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-5 shadow-2xl text-zinc-200">
@@ -263,113 +255,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               Batuan vulkanik ireguler bersudut tajam memiliki hambatan aerodinamis Cd = 0.65 – 0.85
             </p>
           </div>
-
-          {/* Multi-Projectile Shower & Dispersion Mode */}
-          <div className="space-y-3 bg-zinc-900/60 p-3.5 rounded-xl border border-amber-500/20 bg-gradient-to-br from-zinc-900/90 to-amber-950/10">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm">🌋</span>
-                <label className="font-medium text-zinc-200 text-xs">Mode Lontaran Proyektil</label>
-              </div>
-              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono font-bold text-xs border border-amber-500/30">
-                {(ballistic.projectileCount ?? 1) > 1 ? `${ballistic.projectileCount} Bom (Shower)` : '1 Batu Tunggal'}
-              </span>
-            </div>
-
-            {/* Mode selection buttons */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => onUpdateBallistic({ projectileCount: 1 })}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                  (ballistic.projectileCount ?? 1) <= 1
-                    ? 'bg-amber-500 text-black font-bold border-amber-400 shadow-md'
-                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
-                }`}
-              >
-                🎯 1 Batu Tunggal
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateBallistic({ projectileCount: Math.max(6, ballistic.projectileCount ?? 6) })}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                  (ballistic.projectileCount ?? 1) > 1
-                    ? 'bg-amber-500 text-black font-bold border-amber-400 shadow-md'
-                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
-                }`}
-              >
-                💥 Pancaran Hujan Bom
-              </button>
-            </div>
-
-            {/* Slider only visible if multi-projectile active */}
-            {(ballistic.projectileCount ?? 1) > 1 && (
-              <div className="space-y-2 pt-1 border-t border-zinc-800/80">
-                <div className="flex justify-between items-center text-xs">
-                  <label htmlFor="input-projectile-count" className="text-zinc-300 text-[11px]">
-                    Kepadatan Pancaran (Jumlah Fragmen):
-                  </label>
-                  <span className="font-mono text-amber-400 font-bold text-xs">
-                    {ballistic.projectileCount ?? 6} proyektil
-                  </span>
-                </div>
-                <input
-                  id="input-projectile-count"
-                  type="range"
-                  min="2"
-                  max="20"
-                  step="1"
-                  value={ballistic.projectileCount ?? 6}
-                  onChange={(e) => onUpdateBallistic({ projectileCount: Number(e.target.value) })}
-                  className="w-full h-1.5 accent-amber-500"
-                />
-
-                {/* Pattern Dispersion Mode */}
-                <div className="pt-1.5 flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-zinc-400">Pola Sebaran:</span>
-                  <div className="flex gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => onUpdateBallistic({ dispersionMode: 'focused' })}
-                      className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                        (ballistic.dispersionMode ?? 'focused') === 'focused'
-                          ? 'bg-zinc-200 text-black font-bold border-white'
-                          : 'bg-zinc-900 text-zinc-400 border-zinc-800'
-                      }`}
-                    >
-                      Terarah (±35°)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onUpdateBallistic({ dispersionMode: 'radial' })}
-                      className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                        ballistic.dispersionMode === 'radial'
-                          ? 'bg-zinc-200 text-black font-bold border-white'
-                          : 'bg-zinc-900 text-zinc-400 border-zinc-800'
-                      }`}
-                    >
-                      Radial 360°
-                    </button>
-                  </div>
-                </div>
-
-                <p className="text-[10px] text-zinc-400 leading-relaxed bg-black/40 p-2 rounded-lg border border-zinc-800/60">
-                  ℹ️ <strong>Konteks Vulkanologi:</strong> Letusan nyata Anak Krakatau memancarkan fragmen batuan pijar berukuran bervariasi (lapili hingga bom masif) yang terlempar secara serentak ke berbagai sudut dan kecepatan, membentuk sebaran kawah benturan.
-                </p>
-              </div>
-            )}
-
-            {onOpenEjectaDetail && (
-              <button
-                type="button"
-                onClick={onOpenEjectaDetail}
-                className="w-full py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-semibold text-xs border border-amber-500/40 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-              >
-                <span>💥</span>
-                <span>Katalog & Detail Lemparan Bom Vulkanik</span>
-              </button>
-            )}
-          </div>
         </div>
 
         {/* RIGHT COLUMN: Plume / Atmospheric Dispersion Parameters */}
@@ -410,48 +295,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               <span>5.000 m (Paroksismal)</span>
             </div>
           </div>
-
-          {/* Real-Time Live Weather Synchronization */}
-          {weather && (
-            <div className="bg-sky-950/30 border border-sky-500/30 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-sky-900/60 border border-sky-400/30 text-sky-300">
-                  <Wind className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>Angin Real-Time Terkini:</span>
-                    <span className="font-mono text-sky-300 bg-sky-950/80 px-1.5 py-0.2 rounded border border-sky-500/30">
-                      {weather.wind.speedMs} m/s ({weather.wind.directionCardinal})
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-zinc-400">
-                    Sumber: {weather.source} • Suhu: {weather.temperatureC ?? 28}°C • Kelembapan: {weather.relativeHumidity ?? 75}%
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => onUpdatePlume({ windSpeed: weather.wind.speedMs, windDirection: weather.wind.directionDeg })}
-                  className="px-2.5 py-1 rounded-lg bg-sky-500 hover:bg-sky-400 text-black font-bold text-[11px] transition-colors shadow-sm"
-                  title="Terapkan kecepatan dan arah angin saat ini ke simulasi"
-                >
-                  Terapkan ke Simulasi
-                </button>
-                {onOpenWeatherModal && (
-                  <button
-                    type="button"
-                    onClick={onOpenWeatherModal}
-                    className="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] transition-colors border border-zinc-700"
-                    title="Buka data sounding atmosfer dan prakiraan 24 jam"
-                  >
-                    Detail
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Wind Speed */}
           <div className="space-y-1.5 bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
@@ -552,17 +395,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 <option value="E">Kelas E: Stabil (Malam Hari)</option>
               </select>
             </div>
-
-            {onOpenAshDetail && (
-              <button
-                type="button"
-                onClick={onOpenAshDetail}
-                className="w-full py-2 px-3 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 font-semibold text-xs border border-purple-500/40 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-              >
-                <span>☁️</span>
-                <span>Matriks Sebaran Abu & Estimasi Ketebalan</span>
-              </button>
-            )}
           </div>
         </div>
       </div>
