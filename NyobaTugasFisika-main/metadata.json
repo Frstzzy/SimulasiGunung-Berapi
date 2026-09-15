@@ -1,0 +1,6 @@
+{
+  "name": "Simulasi Erupsi Gunung Anak Krakatau",
+  "description": "Aplikasi simulasi komputasi fisika gerak peluru material vulkanik, pemodelan dispersi abu erupsi Gunung Anak Krakatau di Selat Sunda, serta integrasi data SIGMET BMKG dan analisis daerah terdampak.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
