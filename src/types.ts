@@ -73,7 +73,7 @@ export interface SimulationStats {
   safeDistanceExceeded: boolean; // Zone III is 5km radius
 }
 
-export type EruptionPresetId = 'strombolian' | 'vulcanian' | 'surtseyan2018' | 'subplinian';
+export type EruptionPresetId = 'strombolian' | 'vulcanian' | 'surtseyan2018' | 'subplinian' | 'krakatau1883';
 
 export type AppTab = 'satellite' | 'map3d' | 'elevation' | 'theory';
 

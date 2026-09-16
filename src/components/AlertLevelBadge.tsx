@@ -8,7 +8,7 @@ import { ShieldAlert, AlertTriangle, CheckCircle2, Flame, Info, ExternalLink, Co
 import { BallisticParams, PlumeParams, EruptionPresetId } from '../types';
 
 export type AlertLevelNumber = 'I' | 'II' | 'III' | 'IV';
-export type AlertLevelName = 'Normal' | 'Waspada' | 'Siaga' | 'Awas';
+export type AlertLevelName = 'Normal' | 'Waspada' | 'Siaga' | 'Awas' | 'Awas (Kataklismik)';
 export type VonaCode = 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED';
 
 export interface AlertLevelInfo {
@@ -41,7 +41,26 @@ export function getAlertLevelInfo(
   const v0 = ballistic.initialVelocity;
 
   // Explicit preset mapping if provided
-  if (presetId === 'paroxysmal2018') {
+  if (presetId === 'krakatau1883') {
+    return {
+      levelNumber: 'IV',
+      name: 'Awas (Kataklismik)',
+      vonaCode: 'RED',
+      exclusionRadiusKm: 25,
+      exclusionRadiusText: 'Radius 25 km (Evakuasi Total)',
+      badgeBg: 'bg-red-950/90',
+      badgeBorder: 'border-red-500',
+      badgeText: 'text-red-200',
+      dotColor: 'bg-red-500',
+      pingColor: 'bg-red-400',
+      accentBg: 'from-red-600/30 to-rose-600/20',
+      summary: 'Kataklismik 1883 (VEI 6) / Bencana Global',
+      threatDescription: 'Runtuhnya kaldera purba, gelombang tsunami masif Selat Sunda, dan awan panas piroklastik melintasi lautan.',
+      actionGuidance: 'Evakuasi total seluruh kawasan pesisir Selat Sunda ke dataran tinggi > 40 mdpl. Tutup seluruh jalur pelayaran dan penerbangan.',
+    };
+  }
+
+  if ((presetId as string) === 'paroxysmal2018' || presetId === 'subplinian') {
     return {
       levelNumber: 'IV',
       name: 'Awas',

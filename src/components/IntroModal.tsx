@@ -10,6 +10,7 @@
 import React, { useState } from 'react';
 import {
   Flame,
+  Mountain,
   Globe,
   Compass,
   FileText,
@@ -42,18 +43,9 @@ export const IntroModal: React.FC<IntroModalProps> = ({
   onSelectPreset,
   onStartSimulation,
 }) => {
-  const [dontShowAgain, setDontShowAgain] = useState<boolean>(false);
-
   if (!isOpen) return null;
 
   const handleStart = () => {
-    if (dontShowAgain) {
-      try {
-        localStorage.setItem('simkratoa_intro_seen', 'true');
-      } catch (e) {
-        // Safe fallback
-      }
-    }
     onStartSimulation();
     onClose();
   };
@@ -76,15 +68,40 @@ export const IntroModal: React.FC<IntroModalProps> = ({
         {/* Top Accent Strip */}
         <div className="h-1.5 w-full bg-gradient-to-r from-red-600 via-amber-500 to-white" />
 
-        {/* Close button */}
-        <button
-          id="close-intro-btn"
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-xl text-zinc-400 hover:text-white bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 transition-all z-20"
-          title="Tutup Intro"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        {/* Top Header Bar inside Intro Modal: Mulai Simulasi SimKratoa in TOP-LEFT Corner */}
+        <div className="px-6 sm:px-8 pt-5 pb-3 flex items-center justify-between gap-3 border-b border-zinc-900 bg-zinc-950">
+          {/* POJOK KIRI ATAS: Mulai Simulasi SimKratoa Button */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <button
+              id="intro-top-start-simkratoa-btn"
+              onClick={handleStart}
+              className="px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-black text-xs font-black shadow-lg shadow-white/10 flex items-center gap-2 transition-all active:scale-95 border border-white cursor-pointer"
+              title="Mulai Simulasi SimKratoa Sekarang"
+            >
+              <Play className="w-4 h-4 fill-black text-black" />
+              <span>Mulai Simulasi SimKratoa</span>
+              <ChevronRight className="w-4 h-4 text-black" />
+            </button>
+
+            <button
+              id="intro-top-skip-btn"
+              onClick={onClose}
+              className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white text-xs font-medium border border-zinc-800 transition-colors"
+            >
+              Langsung ke Peta
+            </button>
+          </div>
+
+          {/* POJOK KANAN ATAS: Close Button */}
+          <button
+            id="close-intro-btn"
+            onClick={onClose}
+            className="p-2 rounded-xl text-zinc-400 hover:text-white bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 transition-all shrink-0"
+            title="Tutup Intro"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
         {/* Hero Header */}
         <div className="p-6 sm:p-8 pb-4 relative overflow-hidden">
@@ -102,8 +119,9 @@ export const IntroModal: React.FC<IntroModalProps> = ({
           </div>
 
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-white text-black flex items-center justify-center shadow-xl shadow-white/10 shrink-0 mt-1">
-              <Flame className="w-8 h-8 text-black fill-black" />
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-b from-amber-500 via-orange-600 to-red-600 text-white flex items-center justify-center shadow-xl shadow-orange-600/30 shrink-0 mt-1 relative overflow-hidden group">
+              <Mountain className="w-8 h-8 text-white stroke-[2.2] fill-white/20 group-hover:scale-105 transition-transform" />
+              <span className="absolute top-2 right-2.5 w-2 h-2 rounded-full bg-amber-200 animate-ping opacity-90" />
             </div>
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
@@ -198,7 +216,7 @@ export const IntroModal: React.FC<IntroModalProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
             {ERUPTION_PRESETS.map((p) => {
               const isSelected = selectedPreset === p.id;
               return (
@@ -227,16 +245,18 @@ export const IntroModal: React.FC<IntroModalProps> = ({
 
         {/* Bottom Actions Bar */}
         <div className="p-6 sm:p-8 pt-4 bg-zinc-950 border-t border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none order-2 sm:order-1">
-            <input
-              id="dont-show-intro-again-checkbox"
-              type="checkbox"
-              checked={dontShowAgain}
-              onChange={(e) => setDontShowAgain(e.target.checked)}
-              className="w-4 h-4 rounded bg-zinc-900 border-zinc-700 text-white accent-white focus:ring-0 focus:ring-offset-0"
-            />
-            <span>Jangan tampilkan otomatis saat memuat ulang</span>
-          </label>
+          <div className="text-xs text-zinc-400 flex flex-col gap-1 order-2 sm:order-1">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Pilih skenario lalu klik Mulai Simulasi</span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-500">
+              <span className="text-zinc-400">⚡ Shortcut:</span>
+              <span><kbd className="px-1 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">Space</kbd> Erupsi</span>
+              <span>•</span>
+              <span><kbd className="px-1 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">1</kbd><kbd className="px-1 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300 ml-0.5">2</kbd><kbd className="px-1 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300 ml-0.5">3</kbd> Ganti Tab</span>
+            </div>
+          </div>
 
           <div className="flex items-center gap-2.5 w-full sm:w-auto order-1 sm:order-2">
             <button

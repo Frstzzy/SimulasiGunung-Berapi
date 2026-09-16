@@ -122,7 +122,7 @@ interface RealSatelliteMapProps {
 }
 
 // Vent coordinate: Gunung Anak Krakatau Crater (WGS84)
-const CRATER_COORDS: [number, number] = [-6.1021, 105.4230];
+export const CRATER_COORDS: [number, number] = [-6.1021, 105.4230];
 
 interface GeoPoint {
   id: string;
@@ -362,33 +362,33 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
   const so2GroupRef = useRef<L.LayerGroup | null>(null);
   const regionalGroupRef = useRef<L.LayerGroup | null>(null);
 
-  // States
-  const [selectedTile, setSelectedTile] = useState<TileProvider>('dark');
-  const [showMaxBallisticRadius, setShowMaxBallisticRadius] = useState<boolean>(true);
+  // States - Clean default settings without blurry/messy overlapping boundaries
+  const [selectedTile, setSelectedTile] = useState<TileProvider>('satellite');
+  const [showMaxBallisticRadius, setShowMaxBallisticRadius] = useState<boolean>(false);
   const [showActiveTrajectory, setShowActiveTrajectory] = useState<boolean>(true);
-  const [showUmbrellaCloud, setShowUmbrellaCloud] = useState<boolean>(true);
-  const [showAshPlumeCones, setShowAshPlumeCones] = useState<boolean>(true);
+  const [showUmbrellaCloud, setShowUmbrellaCloud] = useState<boolean>(false);
+  const [showAshPlumeCones, setShowAshPlumeCones] = useState<boolean>(false);
   const [showWindVector, setShowWindVector] = useState<boolean>(true);
-  const [showRadiusLabels, setShowRadiusLabels] = useState<boolean>(true);
+  const [showRadiusLabels, setShowRadiusLabels] = useState<boolean>(false);
   const [showKRBZones, setShowKRBZones] = useState<boolean>(true);
   const [showLandmarks, setShowLandmarks] = useState<boolean>(true);
-  const [showShipping, setShowShipping] = useState<boolean>(true);
+  const [showShipping, setShowShipping] = useState<boolean>(false);
 
-  // Flight Level & Atmospheric Gas Indicators (Inspired by abu.cikoytew.my.id)
+  // Flight Level & Atmospheric Gas Indicators (disabled by default for clean view)
   const [selectedFlightLevel, setSelectedFlightLevel] = useState<FlightLevelKey>('ALL');
-  const [showSo2Layer, setShowSo2Layer] = useState<boolean>(true);
+  const [showSo2Layer, setShowSo2Layer] = useState<boolean>(false);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
 
-  // Population Density & Coastal Hazard Heatmap States
-  const [showHazardHeatmap, setShowHazardHeatmap] = useState<boolean>(true);
+  // Population Density & Coastal Hazard Heatmap States (disabled by default to keep coastlines crisp)
+  const [showHazardHeatmap, setShowHazardHeatmap] = useState<boolean>(false);
   const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>('composite');
   const [heatmapOpacity, setHeatmapOpacity] = useState<number>(0.75);
   const [selectedHeatNodeId, setSelectedHeatNodeId] = useState<string | null>(null);
 
-  // BMKG Official Layer & Affected Areas States
-  const [showBmkgSigmet, setShowBmkgSigmet] = useState<boolean>(true);
-  const [showBmkgAshDeposit, setShowBmkgAshDeposit] = useState<boolean>(true);
-  const [showBmkgAffectedAreas, setShowBmkgAffectedAreas] = useState<boolean>(true);
+  // BMKG Official Layer & Affected Areas States (available via toggle/modal)
+  const [showBmkgSigmet, setShowBmkgSigmet] = useState<boolean>(false);
+  const [showBmkgAshDeposit, setShowBmkgAshDeposit] = useState<boolean>(false);
+  const [showBmkgAffectedAreas, setShowBmkgAffectedAreas] = useState<boolean>(false);
   const [isBmkgModalOpen, setIsBmkgModalOpen] = useState<boolean>(false);
   const [activeBmkgScenarioId, setActiveBmkgScenarioId] = useState<string>('sigmet-west-monsoon');
 
@@ -427,6 +427,14 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
     distKm: number;
     bearingDeg: number;
   } | null>(null);
+  const [isMeasuring, setIsMeasuring] = useState<boolean>(false);
+  const handleToggleMeasure = () => {
+    setIsMeasuring((prev) => {
+      const next = !prev;
+      if (!next) setPinnedMeasure(null);
+      return next;
+    });
+  };
   const measureLineRef = useRef<L.Polyline | null>(null);
 
   // === Physical Radius Metrics Calculations ===
@@ -724,46 +732,24 @@ export const RealSatelliteMap: React.FC<RealSatelliteMapProps> = ({
 
     if (!showKRBZones) return;
 
-    // KRB III - 5.0 km (Steril Danger Zone)
+    // Batas Resmi Zona Bahaya Steril 5.0 km (PVMBG Rekomendasi Resmi)
     const krb3 = L.circle(CRATER_COORDS, {
       radius: 5000,
       color: '#ef4444',
-      weight: 2,
-      dashArray: '8, 6',
+      weight: 2.2,
+      opacity: 0.9,
       fillColor: '#ef4444',
-      fillOpacity: 0.12,
+      fillOpacity: 0.08,
     });
     krb3.bindPopup(`
       <div class="p-2 text-xs font-sans text-zinc-100">
-        <div class="font-bold text-red-400 text-sm mb-1">⚠️ KRB III: Zona Steril 5.0 km (PVMBG)</div>
+        <div class="font-bold text-red-400 text-sm mb-1">⚠️ Batas Radius Bahaya Steril 5.0 km (PVMBG)</div>
         <p class="text-[11px] text-zinc-300">
-          Zona bahaya ekstrem yang terancam lontaran batu pijar/bom vulkanik, awan panas, dan gas beracun. Harus dikosongkan total.
+          Radius steril resmi dari kawah aktif Gunung Anak Krakatau. Masyarakat dilarang mendekati atau beraktivitas dalam batas 5 km.
         </p>
       </div>
     `);
     group.addLayer(krb3);
-
-    // KRB II - 7.5 km
-    const krb2 = L.circle(CRATER_COORDS, {
-      radius: 7500,
-      color: '#f59e0b',
-      weight: 1.2,
-      dashArray: '5, 8',
-      fillColor: '#f59e0b',
-      fillOpacity: 0.05,
-    });
-    group.addLayer(krb2);
-
-    // KRB I - 12.0 km
-    const krb1 = L.circle(CRATER_COORDS, {
-      radius: 12000,
-      color: '#71717a',
-      weight: 1,
-      dashArray: '4, 10',
-      fillColor: '#71717a',
-      fillOpacity: 0.03,
-    });
-    group.addLayer(krb1);
   }, [showKRBZones]);
 
   // 4. Render Projectile / Volcanic Bomb Radii & Trajectory

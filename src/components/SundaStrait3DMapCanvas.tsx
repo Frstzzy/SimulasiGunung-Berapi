@@ -18,6 +18,12 @@ import {
   Navigation,
   MapPin,
   Mountain,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Sliders,
+  Sparkles,
 } from 'lucide-react';
 import { BallisticParams, PlumeParams, CameraPreset3D, LightingMode3D } from '../types';
 import { computeTrajectory3D } from '../physics/ballistics';
@@ -78,6 +84,11 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
   const [showGeologicalLabels, setShowGeologicalLabels] = useState<boolean>(true);
   const [selectedLandmark, setSelectedLandmark] = useState<GeologicalLandmark3D | null>(null);
   const [landmarkScreenPositions, setLandmarkScreenPositions] = useState<LandmarkScreenPos[]>([]);
+
+  // UI Panel Collapse & Tab States for Cleaner View
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState<boolean>(true);
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
+  const [leftTab, setLeftTab] = useState<'camera' | 'ash'>('camera');
 
   // Live telemetry overlay
   const [activeTelemetry, setActiveTelemetry] = useState({
@@ -1757,316 +1768,397 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
       </div>
 
       {/* TOP LEFT: Quick Preset Camera Toolbar, Azimuth, and Ash Dispersal Control Card */}
-      <div className="absolute top-4 left-4 flex flex-col gap-2.5 z-10 max-w-xs max-h-[calc(100%-2rem)] overflow-y-auto pr-1 scrollbar-none">
-        <div className="bg-black/90 backdrop-blur-xl p-3.5 rounded-2xl border border-zinc-800 text-xs text-zinc-200 shadow-2xl space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="font-bold flex items-center gap-2 text-white">
-              <Eye className="w-4 h-4 text-white" />
-              Kamera Peta 3D
-            </span>
-            <span className="text-[10px] font-mono text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded-full border border-zinc-750">
-              Selat Sunda
-            </span>
-          </div>
+      <div className="absolute top-4 left-4 z-10 max-w-xs pointer-events-auto">
+        {!isLeftPanelOpen ? (
+          <button
+            onClick={() => setIsLeftPanelOpen(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-black/90 hover:bg-zinc-900 border border-zinc-800 text-xs font-semibold text-white shadow-2xl backdrop-blur-xl transition-all"
+            title="Buka Panel Kamera & Dispersi"
+          >
+            <Eye className="w-4 h-4 text-white" />
+            <span>Kamera & Abu 3D</span>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
+          </button>
+        ) : (
+          <div className="flex flex-col gap-2.5 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1 scrollbar-none animate-in fade-in slide-in-from-left-2 duration-200">
+            {/* Top Navigation Switcher (Kamera vs Dispersi Abu) */}
+            <div className="bg-black/92 backdrop-blur-xl p-2 rounded-2xl border border-zinc-800 shadow-2xl flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setLeftTab('camera')}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold flex items-center gap-1.5 transition-all ${
+                    leftTab === 'camera'
+                      ? 'bg-white text-black font-bold shadow-sm'
+                      : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+                  }`}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Kamera & Azimut</span>
+                </button>
+                <button
+                  onClick={() => setLeftTab('ash')}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold flex items-center gap-1.5 transition-all ${
+                    leftTab === 'ash'
+                      ? 'bg-white text-black font-bold shadow-sm'
+                      : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+                  }`}
+                >
+                  <span>☁️</span>
+                  <span>Dispersi Abu</span>
+                </button>
+              </div>
 
-          {/* Preset Buttons */}
-          <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-            {[
-              { id: 'crater', label: '🌋 Kawah Dekat' },
-              { id: 'rim', label: '⛰️ Bibir Kawah 157m' },
-              { id: 'krakatau', label: '🏝️ Anak Krakatau' },
-              { id: 'orbit', label: '🛰️ Orbit Selat Sunda' },
-              { id: 'anyer', label: '🌅 Tampak Banten' },
-              { id: 'kalianda', label: '⛰️ Tampak Lampung' },
-              { id: 'ship', label: '🚢 Kapal ALKI I' },
-              { id: 'follow', label: '🎯 Ikuti Bom' },
-            ].map((p) => (
               <button
-                key={p.id}
-                onClick={() => applyCameraPreset(p.id as CameraPreset3D)}
-                className={`px-2.5 py-1.5 rounded-xl text-left font-medium transition-all border ${
-                  cameraPreset === p.id
-                    ? 'bg-white text-black font-bold border-white shadow-sm'
-                    : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-850 hover:border-zinc-700'
-                }`}
+                onClick={() => setIsLeftPanelOpen(false)}
+                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                title="Ciutkan Panel"
               >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Lighting Mode Selector */}
-          <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-[11px]">
-            <span className="text-zinc-400 font-medium">Waktu / Atmosfer:</span>
-            <div className="flex items-center gap-1 bg-zinc-900 p-0.5 rounded-lg border border-zinc-800">
-              <button
-                onClick={() => setLightingMode('day')}
-                className={`p-1.5 rounded-md transition-all ${
-                  lightingMode === 'day' ? 'bg-white text-black font-bold' : 'text-zinc-400 hover:text-white'
-                }`}
-                title="Siang Hari"
-              >
-                <Sun className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => setLightingMode('sunset')}
-                className={`p-1.5 rounded-md transition-all ${
-                  lightingMode === 'sunset' ? 'bg-white text-black font-bold' : 'text-zinc-400 hover:text-white'
-                }`}
-                title="Senja Magma"
-              >
-                <Sunset className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => setLightingMode('night')}
-                className={`p-1.5 rounded-md transition-all ${
-                  lightingMode === 'night' ? 'bg-white text-black font-bold' : 'text-zinc-400 hover:text-white'
-                }`}
-                title="Malam Erupsi"
-              >
-                <Moon className="w-3.5 h-3.5" />
+                <ChevronLeft className="w-3.5 h-3.5" />
               </button>
             </div>
-          </div>
-        </div>
 
-        {/* 3D Launch Azimuth Dial */}
-        <div className="bg-black/90 backdrop-blur-xl p-3 rounded-2xl border border-zinc-800 text-xs text-zinc-200 shadow-2xl space-y-2">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-              <Navigation className="w-3.5 h-3.5 text-white" />
-              Azimut Lontaran 3D:
-            </span>
-            <span className="font-mono font-bold text-white bg-zinc-900 px-2 py-0.5 rounded border border-zinc-700">
-              {launchAzimuth}° (
-              {launchAzimuth >= 315 || launchAzimuth < 45
-                ? 'U'
-                : launchAzimuth < 135
-                ? 'T'
-                : launchAzimuth < 225
-                ? 'S'
-                : 'B'}
-              )
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={359}
-            step={5}
-            value={launchAzimuth}
-            onChange={(e) => handleAzimuthChange(Number(e.target.value))}
-            className="w-full h-1.5 bg-zinc-800 rounded-lg cursor-pointer accent-white"
-          />
-          <div className="flex justify-between text-[9px] font-mono text-zinc-500">
-            <span>0° (U)</span>
-            <span>90° (T/Jawa)</span>
-            <span>180° (S/Rakata)</span>
-            <span>270° (B/Smtr)</span>
-          </div>
-        </div>
+            {leftTab === 'camera' ? (
+              <>
+                <div className="bg-black/90 backdrop-blur-xl p-3.5 rounded-2xl border border-zinc-800 text-xs text-zinc-200 shadow-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold flex items-center gap-2 text-white">
+                      <Eye className="w-4 h-4 text-white" />
+                      Preset Kamera 3D
+                    </span>
+                    <span className="text-[10px] font-mono text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded-full border border-zinc-750">
+                      Selat Sunda
+                    </span>
+                  </div>
 
-        {/* REAL-TIME VOLCANIC ASH DISPERSAL SIMULATION CARD */}
-        <AshDispersalControlCard
-          plume={plume}
-          onUpdateWind={onUpdateWind}
-          showAshCloud3D={showAshCloud3D}
-          onToggleAshCloud3D={() => setShowAshCloud3D(!showAshCloud3D)}
-          showAshFootprint={showAshFootprint}
-          onToggleAshFootprint={() => setShowAshFootprint(!showAshFootprint)}
-          downwindReachKm={downwindReachKm}
-        />
+                  {/* Preset Buttons */}
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                    {[
+                      { id: 'crater', label: '🌋 Kawah Dekat' },
+                      { id: 'rim', label: '⛰️ Bibir Kawah 157m' },
+                      { id: 'krakatau', label: '🏝️ Anak Krakatau' },
+                      { id: 'orbit', label: '🛰️ Orbit Selat Sunda' },
+                      { id: 'anyer', label: '🌅 Tampak Banten' },
+                      { id: 'kalianda', label: '⛰️ Tampak Lampung' },
+                      { id: 'ship', label: '🚢 Kapal ALKI I' },
+                      { id: 'follow', label: '🎯 Ikuti Bom' },
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => applyCameraPreset(p.id as CameraPreset3D)}
+                        className={`px-2.5 py-1.5 rounded-xl text-left font-medium transition-all border ${
+                          cameraPreset === p.id
+                            ? 'bg-white text-black font-bold border-white shadow-sm'
+                            : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-850 hover:border-zinc-700'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Lighting Mode Selector */}
+                  <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-[11px]">
+                    <span className="text-zinc-400 font-medium">Waktu / Atmosfer:</span>
+                    <div className="flex items-center gap-1 bg-zinc-900 p-0.5 rounded-lg border border-zinc-800">
+                      <button
+                        onClick={() => setLightingMode('day')}
+                        className={`p-1.5 rounded-md transition-all ${
+                          lightingMode === 'day' ? 'bg-white text-black font-bold' : 'text-zinc-400 hover:text-white'
+                        }`}
+                        title="Siang Hari"
+                      >
+                        <Sun className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setLightingMode('sunset')}
+                        className={`p-1.5 rounded-md transition-all ${
+                          lightingMode === 'sunset' ? 'bg-white text-black font-bold' : 'text-zinc-400 hover:text-white'
+                        }`}
+                        title="Senja Magma"
+                      >
+                        <Sunset className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setLightingMode('night')}
+                        className={`p-1.5 rounded-md transition-all ${
+                          lightingMode === 'night' ? 'bg-white text-black font-bold' : 'text-zinc-400 hover:text-white'
+                        }`}
+                        title="Malam Erupsi"
+                      >
+                        <Moon className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3D Launch Azimuth Dial */}
+                <div className="bg-black/90 backdrop-blur-xl p-3 rounded-2xl border border-zinc-800 text-xs text-zinc-200 shadow-2xl space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                      <Navigation className="w-3.5 h-3.5 text-white" />
+                      Azimut Lontaran 3D:
+                    </span>
+                    <span className="font-mono font-bold text-white bg-zinc-900 px-2 py-0.5 rounded border border-zinc-700">
+                      {launchAzimuth}° (
+                      {launchAzimuth >= 315 || launchAzimuth < 45
+                        ? 'U'
+                        : launchAzimuth < 135
+                        ? 'T'
+                        : launchAzimuth < 225
+                        ? 'S'
+                        : 'B'}
+                      )
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={359}
+                    step={5}
+                    value={launchAzimuth}
+                    onChange={(e) => handleAzimuthChange(Number(e.target.value))}
+                    className="w-full h-1.5 bg-zinc-800 rounded-lg cursor-pointer accent-white"
+                  />
+                  <div className="flex justify-between text-[9px] font-mono text-zinc-500">
+                    <span>0° (U)</span>
+                    <span>90° (T/Jawa)</span>
+                    <span>180° (S/Rakata)</span>
+                    <span>270° (B/Smtr)</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* REAL-TIME VOLCANIC ASH DISPERSAL SIMULATION CARD */
+              <AshDispersalControlCard
+                plume={plume}
+                onUpdateWind={onUpdateWind}
+                showAshCloud3D={showAshCloud3D}
+                onToggleAshCloud3D={() => setShowAshCloud3D(!showAshCloud3D)}
+                showAshFootprint={showAshFootprint}
+                onToggleAshFootprint={() => setShowAshFootprint(!showAshFootprint)}
+                downwindReachKm={downwindReachKm}
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {/* TOP RIGHT: Real-time Telemetry & INTEGRATED ZOOM BAR */}
-      <div className="absolute top-4 right-4 flex flex-col gap-2.5 z-10 w-72 sm:w-80">
-        {/* Real-time 3D Telemetry HUD */}
-        <div className="bg-black/90 backdrop-blur-xl p-3.5 rounded-2xl border border-zinc-800 text-xs text-zinc-200 shadow-2xl space-y-2">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-            <span className="font-bold flex items-center gap-1.5 text-white">
-              <Flame className="w-4 h-4 text-white animate-pulse" />
-              Telemetri Bom Vulkanik 3D
-            </span>
-            <span className="text-[10px] font-mono text-zinc-400">
-              t = {activeTelemetry.flightTime}s
-            </span>
+      <div className="absolute top-4 right-4 z-10 w-72 sm:w-80 pointer-events-auto">
+        {!isRightPanelOpen ? (
+          <div className="flex justify-end">
+            <button
+              onClick={() => setIsRightPanelOpen(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-black/90 hover:bg-zinc-900 border border-zinc-800 text-xs font-semibold text-white shadow-2xl backdrop-blur-xl transition-all"
+              title="Buka Panel Telemetri & Zoom"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 text-zinc-400" />
+              <Mountain className="w-4 h-4 text-amber-400 stroke-[2.2] fill-amber-500/20" />
+              <span>Telemetri & Lapisan</span>
+            </button>
           </div>
+        ) : (
+          <div className="flex flex-col gap-2.5 max-h-[calc(100vh-8rem)] overflow-y-auto pr-0.5 scrollbar-none animate-in fade-in slide-in-from-right-2 duration-200">
+            {/* Real-time 3D Telemetry HUD */}
+            <div className="bg-black/90 backdrop-blur-xl p-3.5 rounded-2xl border border-zinc-800 text-xs text-zinc-200 shadow-2xl space-y-2">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                <span className="font-bold flex items-center gap-1.5 text-white">
+                  <Mountain className="w-4 h-4 text-amber-400 stroke-[2.2] fill-amber-500/20" />
+                  Telemetri Bom Vulkanik 3D
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-zinc-400 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                    t = {activeTelemetry.flightTime}s
+                  </span>
+                  <button
+                    onClick={() => setIsRightPanelOpen(false)}
+                    className="p-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                    title="Ciutkan Panel"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
 
-          <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-            <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-850">
-              <span className="text-[10px] text-zinc-400 block font-sans">Ketinggian (Y)</span>
-              <span className="text-sm font-bold text-white">{activeTelemetry.bombAlt} m</span>
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-850">
+                  <span className="text-[10px] text-zinc-400 block font-sans">Ketinggian (Y)</span>
+                  <span className="text-sm font-bold text-white">{activeTelemetry.bombAlt} m</span>
+                </div>
+                <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-850">
+                  <span className="text-[10px] text-zinc-400 block font-sans">Jarak Vent (XZ)</span>
+                  <span
+                    className={`text-sm font-bold ${
+                      activeTelemetry.bombDist >= 5000 ? 'text-amber-400' : 'text-zinc-200'
+                    }`}
+                  >
+                    {(activeTelemetry.bombDist / 1000).toFixed(2)} km
+                  </span>
+                </div>
+                <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-850">
+                  <span className="text-[10px] text-zinc-400 block font-sans">Kecepatan</span>
+                  <span className="text-sm font-bold text-white">{activeTelemetry.bombSpeed} m/s</span>
+                </div>
+                <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-850">
+                  <span className="text-[10px] text-zinc-400 block font-sans">Status Benturan</span>
+                  <span
+                    className={`text-[11px] font-bold ${
+                      activeTelemetry.landed ? 'text-sky-300' : 'text-amber-300'
+                    }`}
+                  >
+                    {activeTelemetry.landed ? '🌊 Air Laut' : '🚀 Melayang'}
+                  </span>
+                </div>
+              </div>
+
+              {activeTelemetry.bombDist >= 5000 && (
+                <div className="p-2 rounded-xl bg-red-950/80 border border-red-800/80 flex items-center gap-2 text-[11px] text-red-200">
+                  <AlertOctagon className="w-4 h-4 text-red-400 flex-shrink-0" />
+                  <span>Bom menembus zona steril KRB III (5.0 km)!</span>
+                </div>
+              )}
             </div>
-            <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-850">
-              <span className="text-[10px] text-zinc-400 block font-sans">Jarak Vent (XZ)</span>
-              <span
-                className={`text-sm font-bold ${
-                  activeTelemetry.bombDist >= 5000 ? 'text-white' : 'text-zinc-300'
-                }`}
-              >
-                {(activeTelemetry.bombDist / 1000).toFixed(2)} km
+
+            {/* INTEGRATED ZOOM CONTROL BAR (ZOOM IN / OUT / SLIDER / PRESETS) */}
+            <Map3DZoomBar
+              zoomDistance={zoomDistance}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onResetZoom={handleResetZoom}
+              onSliderChange={handleSliderChange}
+              scrollSensitivity={scrollSensitivity}
+              onChangeSensitivity={setScrollSensitivity}
+              onSelectDistancePreset={handleSelectDistancePreset}
+              showGeologicalLabels={showGeologicalLabels}
+              onToggleGeologicalLabels={() => setShowGeologicalLabels(!showGeologicalLabels)}
+            />
+
+            {/* Layer Toggles */}
+            <div className="bg-black/90 backdrop-blur-xl p-3 rounded-2xl border border-zinc-800 text-xs text-zinc-300 shadow-2xl space-y-2">
+              <span className="font-semibold text-white flex items-center gap-1.5 text-[11px]">
+                <Layers className="w-3.5 h-3.5 text-white" />
+                Lapisan Visualisasi 3D:
               </span>
-            </div>
-            <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-850">
-              <span className="text-[10px] text-zinc-400 block font-sans">Kecepatan</span>
-              <span className="text-sm font-bold text-white">{activeTelemetry.bombSpeed} m/s</span>
-            </div>
-            <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-850">
-              <span className="text-[10px] text-zinc-400 block font-sans">Status Benturan</span>
-              <span
-                className="text-[11px] font-bold text-zinc-200"
-              >
-                {activeTelemetry.landed ? '🌊 Air Laut' : '🚀 Di Udara'}
-              </span>
+              <div className="space-y-1.5 text-[11px]">
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={showAshCloud3D}
+                    onChange={(e) => setShowAshCloud3D(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-zinc-400" />
+                    Kolom & Payung Abu ({plume.windSpeed} m/s)
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={showAshRain}
+                    onChange={(e) => setShowAshRain(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
+                    Hujan Abu Vulkanik & Tirai Jatuhan
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={showVolcanicLightning}
+                    onChange={(e) => setShowVolcanicLightning(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
+                    Petir Vulkanik Awan Abu
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={showPyroclasticFlow}
+                    onChange={(e) => setShowPyroclasticFlow(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-600" />
+                    Awan Panas Guguran (PDC) Lereng
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={showHazardZones}
+                    onChange={(e) => setShowHazardZones(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                    Radius Bahaya 1.5 km (KRB III)
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={showAltitudeGauge}
+                    onChange={(e) => setShowAltitudeGauge(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
+                    Mistar Ketinggian Erupsi 3D
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={showAshFootprint}
+                    onChange={(e) => setShowAshFootprint(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-white/70" />
+                    Isopach Sebaran Abu Laut (~{downwindReachKm.toFixed(0)} km)
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={showVacuumTrajectory}
+                    onChange={(e) => setShowVacuumTrajectory(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-0.5 bg-zinc-400" />
+                    Parabola Vakum (Garis Putus)
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={autoRotate}
+                    onChange={(e) => setAutoRotate(e.target.checked)}
+                    className="rounded border-zinc-700 text-white focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <Rotate3d className="w-3.5 h-3.5 text-white" />
+                    Putar Kamera Otomatis
+                  </span>
+                </label>
+              </div>
             </div>
           </div>
-
-          {activeTelemetry.bombDist >= 5000 && (
-            <div className="p-2 rounded-xl bg-zinc-900 border border-zinc-700 flex items-center gap-2 text-[11px] text-white">
-              <AlertOctagon className="w-4 h-4 text-white flex-shrink-0" />
-              <span>Bom menembus zona steril KRB III (5.0 km)!</span>
-            </div>
-          )}
-        </div>
-
-        {/* INTEGRATED ZOOM CONTROL BAR (ZOOM IN / OUT / SLIDER / PRESETS) */}
-        <Map3DZoomBar
-          zoomDistance={zoomDistance}
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onResetZoom={handleResetZoom}
-          onSliderChange={handleSliderChange}
-          scrollSensitivity={scrollSensitivity}
-          onChangeSensitivity={setScrollSensitivity}
-          onSelectDistancePreset={handleSelectDistancePreset}
-          showGeologicalLabels={showGeologicalLabels}
-          onToggleGeologicalLabels={() => setShowGeologicalLabels(!showGeologicalLabels)}
-        />
-
-        {/* Layer Toggles */}
-        <div className="bg-black/90 backdrop-blur-xl p-3 rounded-2xl border border-zinc-800 text-xs text-zinc-300 shadow-2xl space-y-2">
-          <span className="font-semibold text-white flex items-center gap-1.5 text-[11px]">
-            <Layers className="w-3.5 h-3.5 text-white" />
-            Layer Visualisasi 3D:
-          </span>
-          <div className="space-y-1.5 text-[11px]">
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={showAshCloud3D}
-                onChange={(e) => setShowAshCloud3D(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-zinc-400" />
-                Kolom & Payung Abu ({plume.windSpeed} m/s)
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={showAshRain}
-                onChange={(e) => setShowAshRain(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
-                Hujan Abu Vulkanik & Tirai Jatuhan
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={showVolcanicLightning}
-                onChange={(e) => setShowVolcanicLightning(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
-                Petir Vulkanik Awan Abu
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={showPyroclasticFlow}
-                onChange={(e) => setShowPyroclasticFlow(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-600" />
-                Awan Panas Guguran (PDC) Lereng
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={showHazardZones}
-                onChange={(e) => setShowHazardZones(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                Radius Bahaya 1.5 km (KRB III)
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={showAltitudeGauge}
-                onChange={(e) => setShowAltitudeGauge(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
-                Mistar Ketinggian Erupsi 3D
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={showAshFootprint}
-                onChange={(e) => setShowAshFootprint(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-white/70" />
-                Isopach Sebaran Abu Laut (~{downwindReachKm.toFixed(0)} km)
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={showVacuumTrajectory}
-                onChange={(e) => setShowVacuumTrajectory(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-0.5 bg-zinc-400" />
-                Parabola Vakum (Garis Putus)
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={autoRotate}
-                onChange={(e) => setAutoRotate(e.target.checked)}
-                className="rounded border-zinc-700 text-white focus:ring-0"
-              />
-              <span className="flex items-center gap-1.5">
-                <Rotate3d className="w-3.5 h-3.5 text-white" />
-                Putar Kamera Otomatis
-              </span>
-            </label>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* BOTTOM LEFT: Quick Compass, Island Legend & Live Ash Dispersal Status */}
-      <div className="absolute bottom-4 left-4 bg-black/90 backdrop-blur-xl p-3 rounded-2xl border border-zinc-800 text-xs text-zinc-300 shadow-2xl flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 text-[11px]">
-          <Compass className="w-4 h-4 text-white" />
-          <span className="font-bold text-white">Detail Geologi & Abu:</span>
+      <div className="absolute bottom-4 left-4 bg-black/90 backdrop-blur-xl p-2.5 sm:p-3 rounded-2xl border border-zinc-800 text-xs text-zinc-300 shadow-2xl flex flex-wrap items-center gap-2.5 sm:gap-3 pointer-events-auto">
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <Mountain className="w-4 h-4 text-amber-400 stroke-[2.2] fill-amber-500/20" />
+          <span className="font-bold text-white">Geologi & Abu:</span>
         </div>
         <div className="flex items-center gap-2 text-[10px] font-mono">
           <span className="flex items-center gap-1 text-zinc-300">
@@ -2082,18 +2174,18 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
             <span className="w-2 h-2 rounded-full bg-zinc-300" /> P. Rakata (813m)
           </span>
           <span className="hidden md:flex items-center gap-1 text-white bg-zinc-900 px-2 py-0.5 rounded border border-zinc-700">
-            💨 Abu Vulkanik: {plume.windSpeed} m/s ({plume.windDirection}°)
+            💨 Abu: {plume.windSpeed} m/s ({plume.windDirection}°)
           </span>
         </div>
       </div>
 
       {/* BOTTOM RIGHT: Drag / Mouse Hints & Quick Scroll Status */}
-      <div className="absolute bottom-4 right-4 bg-black/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-zinc-800 text-[10px] text-zinc-400 font-mono pointer-events-none hidden sm:flex items-center gap-2">
-        <span>Scroll: Zoom In / Out</span>
+      <div className="absolute bottom-4 right-4 bg-black/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-zinc-800 text-[10px] text-zinc-400 font-mono pointer-events-none hidden sm:flex items-center gap-2 shadow-lg">
+        <span>🖱️ Putar: Klik + Geser</span>
         <span>•</span>
-        <span>Klik Kiri: Orbit 3D</span>
+        <span>🔍 Zoom: Scroll / Cubit</span>
         <span>•</span>
-        <span>Klik Dobel: Dekati Titik</span>
+        <span>📌 Pin: Fokus Lokasi</span>
       </div>
 
       {/* GEOLOGICAL LANDMARK DETAIL MODAL */}
