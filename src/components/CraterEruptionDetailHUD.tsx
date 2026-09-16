@@ -6,7 +6,6 @@
 import React, { useState } from 'react';
 import {
   Flame,
-  Mountain,
   Zap,
   CloudRain,
   Ruler,
@@ -77,9 +76,8 @@ export const CraterEruptionDetailHUD: React.FC<CraterEruptionDetailHUDProps> = (
       {/* HUD Header */}
       <div className="p-3 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-b from-amber-950/80 to-red-950/80 border border-amber-500/40 flex items-center justify-center relative overflow-hidden">
-            <Mountain className="w-4 h-4 text-amber-400 stroke-[2.2] fill-amber-500/20" />
-            <span className="absolute top-1 right-1 w-1 h-1 rounded-full bg-red-500 animate-ping" />
+          <div className="w-6 h-6 rounded-lg bg-orange-500/20 border border-orange-500/40 flex items-center justify-center">
+            <Flame className="w-3.5 h-3.5 text-orange-400 animate-pulse" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
@@ -89,7 +87,7 @@ export const CraterEruptionDetailHUD: React.FC<CraterEruptionDetailHUDProps> = (
               </span>
             </div>
             <span className="text-[10px] text-zinc-400 font-mono">
-              G. Anak Krakatau • 157 mdpl (Selat Sunda)
+              Anak Krakatau • 6.102°S, 105.423°E
             </span>
           </div>
         </div>

@@ -122,33 +122,4 @@ export const ERUPTION_PRESETS: EruptionPreset[] = [
     },
     dangerRadiusKm: 5,
   },
-  {
-    id: 'krakatau1883',
-    name: 'Krakatau 1883 (Kataklismik VEI 6)',
-    subtitle: 'Letusan Kolosal Bersejarah & Tsunami Selat Sunda',
-    description:
-      'Rekonstruksi letusan dahsyat 26–27 Agustus 1883 yang meruntuhkan kaldera purba Krakatau. Dentuman terdengar hingga 4.800 km, kolom letusan plinian mencapai stratosfer setinggi 25 km, serta melontarkan bom vulkanik masif berdiameter lebih dari 1 meter yang mengubah topografi Selat Sunda.',
-    ballistic: {
-      initialVelocity: 420, // m/s (dekompresi magma supersaturasi gas)
-      launchAngle: 48,
-      launchAzimuth: 240, // Lontaran masif ke arah barat daya
-      rockDiameter: 1.2, // 1.2 m bom vulkanik
-      rockDensity: 2400, // kg/m^3
-      dragCoefficient: 0.7,
-      enableAirDrag: true,
-      ventElevation: 813, // Ketinggian puncak Rakata sebelum runtuh
-      gravity: 9.81,
-      projectileCount: 20,
-      dispersionMode: 'radial',
-    },
-    plume: {
-      columnHeight: 25000, // 25 km menembus stratosfer
-      emissionRate: 10.0,
-      windSpeed: 22.0, // Angin lapisan tinggi
-      windDirection: 75, // Dari Timur Laut ke Barat Daya
-      particleSize: 'fine',
-      stabilityClass: 'A',
-    },
-    dangerRadiusKm: 25, // Radius terdampak total 25 km
-  },
 ];

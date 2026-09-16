@@ -35,8 +35,13 @@ export default function App() {
   const [isAshDetailModalOpen, setIsAshDetailModalOpen] = useState<boolean>(false);
   const [isAerosolModalOpen, setIsAerosolModalOpen] = useState<boolean>(false);
   const [isExportPdfModalOpen, setIsExportPdfModalOpen] = useState<boolean>(false);
-  // Always start the website on the Intro screen per user request
-  const [isIntroModalOpen, setIsIntroModalOpen] = useState<boolean>(true);
+  const [isIntroModalOpen, setIsIntroModalOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('simkratoa_intro_seen') !== 'true';
+    } catch {
+      return true;
+    }
+  });
 
   // Weather state & auto-sync
   const [weather, setWeather] = useState<KrakatauWeather | null>(null);
@@ -135,48 +140,7 @@ export default function App() {
 
   const handleTriggerEruption = useCallback(() => {
     setTriggerCount((c) => c + 1);
-    if (!isMuted) {
-      volcanicAudio.playEruptionBlast(0.8);
-    }
-  }, [isMuted]);
-
-  // Global Keyboard Shortcuts Listener:
-  // - 'Space': Trigger Eruption
-  // - '1': Tab Peta Satelit
-  // - '2': Tab Peta 3D
-  // - '3': Tab Elevasi 2D
-  // - '4': Tab Fisika & Teori
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore when user is typing in input fields, textareas, selects, or contenteditable elements
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-
-      if (e.code === 'Space' || e.key === ' ') {
-        e.preventDefault();
-        handleTriggerEruption();
-      } else if (e.key === '1') {
-        setActiveTab('satellite');
-      } else if (e.key === '2') {
-        setActiveTab('map3d');
-      } else if (e.key === '3') {
-        setActiveTab('elevation');
-      } else if (e.key === '4') {
-        setActiveTab('theory');
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleTriggerEruption]);
+  }, []);
 
   const handleReset = useCallback(() => {
     const preset = ERUPTION_PRESETS.find((p) => p.id === selectedPreset) || ERUPTION_PRESETS[0];

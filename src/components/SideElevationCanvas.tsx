@@ -35,9 +35,7 @@ import {
   Compass,
   Clock,
   Eye,
-  Mountain,
-  ChevronDown,
-  ChevronUp
+  Mountain
 } from 'lucide-react';
 import { BallisticParams, PlumeParams, ProjectileState, KrakatauWeather } from '../types';
 import {
@@ -175,7 +173,7 @@ const TRANSECT_LANDMARKS: TransectLandmark[] = [
 ];
 
 type DrawerType = 'impact' | 'aerosol' | 'layers' | 'weather' | 'analysis' | 'bmkg' | null;
-type ViewFocusMode = 'super_zoom' | 'crater' | 'caldera' | 'sunda' | 'atmosphere';
+type ViewFocusMode = 'crater' | 'caldera' | 'sunda' | 'atmosphere';
 
 export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
   ballistic,
@@ -199,19 +197,15 @@ export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Viewport transformation: scale (meters to pixels), offset
-  // Defaulting to 0.35 gives a crisp, high-detail zoom into Anak Krakatau crater (157m peak)
-  const [scale, setScale] = useState<number>(0.35); // pixels per meter
+  const [scale, setScale] = useState<number>(0.12); // pixels per meter
   const [originX, setOriginX] = useState<number>(180);
   const [originY, setOriginY] = useState<number>(450);
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [probePos, setProbePos] = useState<{ x: number; y: number } | null>(null);
 
-  // View focus preset - with zoom in version as prominent option
+  // View focus preset
   const [viewFocus, setViewFocus] = useState<ViewFocusMode>('crater');
-
-  // Bottom dock toggle: when collapsed, provides an unobstructed full-canvas view
-  const [isBottomDockOpen, setIsBottomDockOpen] = useState<boolean>(true);
 
   // Flight Level & Drawer
   const [selectedFlightLevel, setSelectedFlightLevel] = useState<FlightLevelKey>('ALL');
@@ -296,63 +290,43 @@ export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
       const rect = containerRef.current.getBoundingClientRect();
       canvasRef.current.width = rect.width;
       canvasRef.current.height = rect.height;
-      // Position sea-level origin well above the bottom dock (dock takes ~160px when open)
-      setOriginY(rect.height - (isBottomDockOpen ? 180 : 70));
+      setOriginY(rect.height - 90);
     };
 
     handleResize();
     const observer = new ResizeObserver(handleResize);
     if (containerRef.current) observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [isBottomDockOpen]);
+  }, []);
 
-  // Quick Camera Focus Presets - including Super Zoom (High-detail 157m crater view)
-  const applyViewFocus = useCallback((mode: ViewFocusMode, dockOpen?: boolean) => {
+  // Quick Camera Focus Presets
+  const applyViewFocus = useCallback((mode: ViewFocusMode) => {
     setViewFocus(mode);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const height = canvas.height;
-    const isDockActive = dockOpen !== undefined ? dockOpen : isBottomDockOpen;
-    const targetOriginY = height - (isDockActive ? 180 : 70);
 
-    if (mode === 'super_zoom') {
-      // High Detail Zoom In on crater vent & summit rim (157m)
-      setScale(0.85);
-      setOriginX(Math.min(260, canvas.width * 0.35));
-      setOriginY(targetOriginY);
-    } else if (mode === 'crater') {
-      // Zoom in on crater vent & landing zone (0 to 2.5 km)
-      setScale(0.32);
-      setOriginX(Math.min(180, canvas.width * 0.25));
-      setOriginY(targetOriginY);
+    if (mode === 'crater') {
+      // Zoom in on crater vent (0 to 1.5 km)
+      setScale(0.24);
+      setOriginX(180);
+      setOriginY(height - 90);
     } else if (mode === 'caldera') {
       // View Anak Krakatau + Rakata cliff (0 to 7 km)
-      setScale(0.12);
+      setScale(0.11);
       setOriginX(140);
-      setOriginY(targetOriginY);
+      setOriginY(height - 90);
     } else if (mode === 'sunda') {
-      // Full transect across Sunda Strait (0 to 35 km)
-      setScale(0.045);
+      // Full transect across Sunda Strait (0 to 25 km)
+      setScale(0.04);
       setOriginX(80);
-      setOriginY(targetOriginY);
+      setOriginY(height - 90);
     } else if (mode === 'atmosphere') {
       // Full vertical atmosphere column (0 to 16 km altitude)
-      setScale(0.035);
-      setOriginX(100);
-      setOriginY(targetOriginY);
+      setScale(0.045);
+      setOriginX(120);
+      setOriginY(height - 70);
     }
-  }, [isBottomDockOpen]);
-
-  // Toggle dock collapse with smooth coordinate compensation
-  const handleToggleBottomDock = useCallback(() => {
-    setIsBottomDockOpen((prev) => {
-      const next = !prev;
-      if (canvasRef.current) {
-        const height = canvasRef.current.height;
-        setOriginY(height - (next ? 180 : 70));
-      }
-      return next;
-    });
   }, []);
 
   // Reset view to default
@@ -677,11 +651,11 @@ export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
 
       // 3. Grid Lines & Altitude Metric Axis
       ctx.lineWidth = 1;
-      const meterStepY = scale >= 0.5 ? 25 : scale >= 0.25 ? 50 : scale > 0.12 ? 100 : scale > 0.06 ? 500 : 1000;
+      const meterStepY = scale > 0.15 ? 100 : scale > 0.06 ? 500 : 1000;
       const startMeterY = Math.max(0, Math.floor(fromScreenY(height) / meterStepY) * meterStepY);
       const endMeterY = Math.ceil(fromScreenY(0) / meterStepY) * meterStepY;
 
-      ctx.strokeStyle = scale >= 0.25 ? 'rgba(255, 255, 255, 0.09)' : 'rgba(255, 255, 255, 0.06)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
       ctx.fillStyle = '#64748b';
       ctx.font = '9px JetBrains Mono, monospace';
 
@@ -698,7 +672,7 @@ export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
       }
 
       // Distance Metric Axis along Horizontal
-      const meterStepX = scale >= 0.5 ? 50 : scale >= 0.25 ? 100 : scale > 0.12 ? 250 : scale > 0.06 ? 1000 : 2500;
+      const meterStepX = scale > 0.15 ? 200 : scale > 0.06 ? 1000 : 2500;
       const startMeterX = Math.floor(fromScreenX(0) / meterStepX) * meterStepX;
       const endMeterX = Math.ceil(fromScreenX(width) / meterStepX) * meterStepX;
 
@@ -793,69 +767,6 @@ export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
           ctx.strokeStyle = lm.id === 'krakatau' ? '#f97316' : '#475569';
           ctx.lineWidth = lm.id === 'krakatau' ? 1.5 : 1;
           ctx.stroke();
-
-          // High-detail Crater & Magma Conduit when in Zoom-In view
-          if (lm.id === 'krakatau' && scale >= 0.2) {
-            const craterHalfW = 120 * scale;
-            const shoulderY = originY - peakH;
-            const ventFloorY = originY - (lm.peakElevation - 40) * scale;
-
-            // Sub-surface magma conduit feeding pipe below vent floor
-            const conduitW = Math.max(12, 45 * scale);
-            const conduitGrad = ctx.createLinearGradient(cx - conduitW / 2, 0, cx + conduitW / 2, 0);
-            conduitGrad.addColorStop(0, '#991b1b');
-            conduitGrad.addColorStop(0.5, '#f97316');
-            conduitGrad.addColorStop(1, '#991b1b');
-            ctx.fillStyle = conduitGrad;
-            ctx.fillRect(cx - conduitW / 2, ventFloorY, conduitW, Math.max(20, originY - ventFloorY + 25));
-
-            // Glowing magma pulses inside conduit
-            const pulse = Math.sin(time * 0.005) * 0.25 + 0.75;
-            ctx.fillStyle = `rgba(254, 240, 138, ${pulse * 0.8})`;
-            ctx.fillRect(cx - conduitW * 0.2, ventFloorY, conduitW * 0.4, Math.max(20, originY - ventFloorY + 25));
-
-            // Glowing active lava lake in crater floor
-            const lavaPoolGrad = ctx.createRadialGradient(cx, ventFloorY, 2, cx, ventFloorY, Math.max(8, craterHalfW * 0.8));
-            lavaPoolGrad.addColorStop(0, '#ffffff');
-            lavaPoolGrad.addColorStop(0.3, '#fbbf24');
-            lavaPoolGrad.addColorStop(0.7, '#ea580c');
-            lavaPoolGrad.addColorStop(1, 'rgba(185, 28, 28, 0)');
-            ctx.fillStyle = lavaPoolGrad;
-            ctx.beginPath();
-            ctx.ellipse(cx, ventFloorY, Math.max(8, craterHalfW * 0.75), Math.max(3, 5 * scale), 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Yellow sulfur deposit tints on crater rim shoulders
-            ctx.strokeStyle = 'rgba(234, 179, 8, 0.85)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(cx - craterHalfW * 1.8, shoulderY);
-            ctx.lineTo(cx - craterHalfW, shoulderY + 6);
-            ctx.moveTo(cx + craterHalfW, shoulderY + 6);
-            ctx.lineTo(cx + craterHalfW * 1.8, shoulderY);
-            ctx.stroke();
-
-            // Detailed close-up annotations when in high zoom
-            if (scale >= 0.35) {
-              // 157m Peak annotation
-              ctx.strokeStyle = 'rgba(251, 191, 36, 0.7)';
-              ctx.setLineDash([2, 2]);
-              ctx.beginPath();
-              ctx.moveTo(cx - craterHalfW * 2, shoulderY);
-              ctx.lineTo(cx - craterHalfW * 2 - 20, shoulderY);
-              ctx.stroke();
-              ctx.setLineDash([]);
-
-              ctx.fillStyle = '#fbbf24';
-              ctx.font = 'bold 9px JetBrains Mono, monospace';
-              ctx.fillText('▲ Bibir 157 mdpl', cx - craterHalfW * 2 - 110, shoulderY + 3);
-
-              // Vent floor annotation
-              ctx.fillStyle = '#f87171';
-              ctx.font = 'bold 9px JetBrains Mono, monospace';
-              ctx.fillText('♨ Vent Magma Aktif', cx + craterHalfW + 10, ventFloorY + 3);
-            }
-          }
 
           // Landmark Label
           if (cx > -100 && cx < width + 100) {
@@ -1200,15 +1111,14 @@ export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
 
           <button
             onClick={() => applyViewFocus('crater')}
-            className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-all border flex items-center gap-1 ${
+            className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-all border ${
               viewFocus === 'crater'
                 ? 'bg-white text-black font-bold border-white shadow-sm'
                 : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800'
             }`}
             title="Perbesar ke kawah aktif G. Anak Krakatau"
           >
-            <Mountain className="w-3 h-3 text-amber-400 stroke-[2.2] fill-amber-500/20" />
-            <span>Kawah</span>
+            🌋 Kawah
           </button>
 
           <button
@@ -1797,8 +1707,8 @@ export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
                   : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
               }`}
             >
-              <Mountain className="w-3.5 h-3.5 fill-current stroke-[2.2]" />
-              <span>Animasi Bom Vulkanik (RK4)</span>
+              <span>💥</span>
+              <span>Animasi Lemparan Bom (Balistik RK4)</span>
             </button>
 
             <button
@@ -1912,10 +1822,7 @@ export const SideElevationCanvas: React.FC<SideElevationCanvasProps> = ({
                 className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
               />
               <div className="flex justify-between text-[10px] font-mono text-zinc-400">
-                <span className="flex items-center gap-1">
-                  <Mountain className="w-3 h-3 text-amber-400 stroke-[2]" />
-                  <span>Kawah G. Anak Krakatau (0s)</span>
-                </span>
+                <span>🌋 Kawah G. Anak Krakatau (0s)</span>
                 <span className="text-white font-bold">
                   {ballisticTime >= totalFlightTime
                     ? `💥 Benturan di Titik Jatuh (${(primaryTrajectory.maxRange / 1000).toFixed(2)} km)!`

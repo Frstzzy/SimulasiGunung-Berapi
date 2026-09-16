@@ -41,10 +41,10 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ ballistic, p
         <div className="flex items-center justify-between text-xs text-zinc-400">
           <span className="flex items-center gap-1.5 font-medium text-zinc-200">
             <ArrowUpRight className="w-4 h-4 text-white" />
-            Jangkauan Balistik
+            Jangkauan Balistik (X)
           </span>
-          <span className="text-[10px] font-mono text-zinc-400">
-            Maksimum
+          <span className="text-[10px] font-mono text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">
+            RK4 Drag
           </span>
         </div>
 
@@ -55,29 +55,31 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ ballistic, p
             </span>
             <span className="text-xs font-semibold text-zinc-400 uppercase">km</span>
           </div>
-          <div className="flex items-center gap-1.5 mt-1 text-[11px] font-mono text-zinc-400">
-            <span>Vakum: {(stats.maxRangeIdeal / 1000).toFixed(2)} km</span>
-            <span>(-{rangeReductionPercent}%)</span>
+          <div className="flex items-center gap-1.5 mt-1 text-[11px] font-mono">
+            <span className="text-zinc-400">Vakum: {(stats.maxRangeIdeal / 1000).toFixed(2)} km</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-zinc-900 text-zinc-200 border border-zinc-700">
+              -{rangeReductionPercent}%
+            </span>
           </div>
         </div>
 
         <div className="text-[11px] text-zinc-400 border-t border-zinc-850 pt-2 flex items-center justify-between">
           <span>Hambatan Udara:</span>
-          <span className="font-mono text-white font-medium">{ballistic.enableAirDrag ? 'Aktif' : 'Off'}</span>
+          <span className="font-mono text-white font-medium">{ballistic.enableAirDrag ? 'Aktif (Cd)' : 'Off'}</span>
         </div>
       </div>
 
       {/* 2. Ketinggian Maksimum & Waktu Terbang */}
-      <div className="relative group bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-2xl p-4 transition-all shadow-md flex flex-col justify-between overflow-hidden">
+      <div className="relative group bg-zinc-950 border border-zinc-800 hover:border-zinc-600 rounded-2xl p-4 transition-all shadow-md flex flex-col justify-between overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-white/60 via-zinc-500/20 to-transparent" />
 
         <div className="flex items-center justify-between text-xs text-zinc-400">
           <span className="flex items-center gap-1.5 font-medium text-zinc-200">
             <Clock className="w-4 h-4 text-white" />
-            Puncak Lontaran (Apogee)
+            Apogee & Durasi
           </span>
-          <span className="text-[10px] font-mono text-zinc-400">
-            Durasi
+          <span className="text-[10px] font-mono text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">
+            Puncak
           </span>
         </div>
 
@@ -88,30 +90,30 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ ballistic, p
             </span>
             <span className="text-xs font-semibold text-zinc-400 uppercase">meter</span>
           </div>
-          <div className="text-[11px] text-zinc-400 font-mono mt-1 flex items-center gap-1.5">
-            <span className="text-white font-medium">{stats.flightTimeWithDrag.toFixed(1)}s</span>
+          <div className="text-[11px] text-zinc-300 font-mono mt-1 flex items-center gap-1.5">
+            <span className="text-white font-medium">{stats.flightTimeWithDrag.toFixed(1)} detik</span>
             <span className="text-zinc-600">•</span>
-            <span>Kecepatan Jatuh {stats.impactSpeedWithDrag.toFixed(0)} m/s</span>
+            <span className="text-zinc-400">{stats.impactSpeedWithDrag.toFixed(0)} m/s</span>
           </div>
         </div>
 
         <div className="text-[11px] text-zinc-400 border-t border-zinc-850 pt-2 flex items-center justify-between">
-          <span>Elevasi Kawah:</span>
+          <span>Ketinggian Kawah:</span>
           <span className="font-mono text-white font-medium">{ballistic.ventElevation} mdpl</span>
         </div>
       </div>
 
       {/* 3. Energi Kinetik Benturan Bom Vulkanik */}
-      <div className="relative group bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-2xl p-4 transition-all shadow-md flex flex-col justify-between overflow-hidden">
+      <div className="relative group bg-zinc-950 border border-zinc-800 hover:border-zinc-600 rounded-2xl p-4 transition-all shadow-md flex flex-col justify-between overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-white/60 via-zinc-500/20 to-transparent" />
 
         <div className="flex items-center justify-between text-xs text-zinc-400">
           <span className="flex items-center gap-1.5 font-medium text-zinc-200">
             <Zap className="w-4 h-4 text-white" />
-            Energi Benturan
+            Energi Benturan (Ek)
           </span>
-          <span className="text-[10px] font-mono text-zinc-400">
-            Kinetik
+          <span className="text-[10px] font-mono text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">
+            ½mv²
           </span>
         </div>
 
@@ -122,25 +124,25 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ ballistic, p
             </span>
             <span className="text-xs font-semibold text-zinc-400 uppercase">MJ</span>
           </div>
-          <div className="text-[11px] text-zinc-400 font-mono mt-1">
+          <div className="text-[11px] text-zinc-300 font-mono mt-1">
             Ekuivalen: <span className="text-white font-semibold">{tntEquivalentKg} kg</span> TNT
           </div>
         </div>
 
         <div className="text-[11px] text-zinc-400 border-t border-zinc-850 pt-2 flex items-center justify-between">
-          <span>Massa Bom:</span>
+          <span>Massa Batuan:</span>
           <span className="font-mono text-white font-medium">{((Math.PI / 6) * Math.pow(ballistic.rockDiameter, 3) * ballistic.rockDensity).toFixed(1)} kg</span>
         </div>
       </div>
 
       {/* 4. Status Zona Bahaya PVMBG & VONA */}
-      <div className="relative group bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-2xl p-4 transition-all shadow-md flex flex-col justify-between overflow-hidden">
+      <div className="relative group bg-zinc-950 border border-zinc-800 hover:border-zinc-600 rounded-2xl p-4 transition-all shadow-md flex flex-col justify-between overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-white/60 via-zinc-500/20 to-transparent" />
 
         <div className="flex items-center justify-between text-xs text-zinc-400">
           <span className="flex items-center gap-1.5 font-medium text-zinc-200">
             <PlaneTakeoff className="w-4 h-4 text-white" />
-            Radius Bahaya KRB
+            VONA & KRB III
           </span>
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${vonaCode.badge}`}>
             {vonaCode.text.split('/')[0]}
