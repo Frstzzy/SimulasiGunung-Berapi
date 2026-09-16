@@ -15,9 +15,12 @@ import {
   Globe,
   Radio,
   MapPin,
-  Sparkles
+  Sparkles,
+  Wind,
+  FileText,
+  Download
 } from 'lucide-react';
-import { EruptionPresetId, AppTab } from '../types';
+import { EruptionPresetId, AppTab, KrakatauWeather } from '../types';
 import { ERUPTION_PRESETS } from '../data/presets';
 
 interface HeaderProps {
@@ -31,6 +34,13 @@ interface HeaderProps {
   onSelectPreset: (id: EruptionPresetId) => void;
   onOpenRoadmap: () => void;
   onOpenBmkg?: () => void;
+  weather?: KrakatauWeather | null;
+  onOpenWeather?: () => void;
+  onOpenEjectaDetail?: () => void;
+  onOpenAshDetail?: () => void;
+  onOpenAerosol?: () => void;
+  onOpenExportPdf?: () => void;
+  onOpenIntro?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -44,62 +54,148 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectPreset,
   onOpenRoadmap,
   onOpenBmkg,
+  weather,
+  onOpenWeather,
+  onOpenEjectaDetail,
+  onOpenAshDetail,
+  onOpenAerosol,
+  onOpenExportPdf,
+  onOpenIntro,
 }) => {
   return (
     <header className="bg-black/95 backdrop-blur-xl border-b border-zinc-800 text-zinc-100 sticky top-0 z-30 transition-all">
       {/* Sleek Top Telemetry Bar */}
-      <div className="border-b border-zinc-850 bg-black/80 px-4 py-1.5 text-xs">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2.5 text-[11px]">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-semibold bg-white text-black border border-white tracking-wide">
-              <span className="w-1.5 h-1.5 rounded-full bg-black animate-ping" />
+      <div className="border-b border-zinc-850 bg-black/90 px-3 sm:px-4 py-1.5 text-xs">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+          {/* Left: Status Badges */}
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-bold bg-white text-black border border-white tracking-wide text-[10.5px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />
               STATUS: SIAGA (LEVEL III)
             </span>
             <span className="text-zinc-700 hidden sm:inline">•</span>
-            <span className="text-zinc-400 hidden sm:inline">
+            <span className="text-zinc-400 hidden sm:inline font-medium">
               G. Anak Krakatau (157 mdpl)
             </span>
-            <span className="text-zinc-700 hidden md:inline">•</span>
-            <span className="text-zinc-400 hidden md:inline font-mono">
+            <span className="text-zinc-700 hidden lg:inline">•</span>
+            <span className="text-zinc-400 hidden lg:inline font-mono text-[10px]">
               06°06'07" LS, 105°25'23" BT
+            </span>
+            <span className="text-[10px] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-full hidden md:inline">
+              Radius Steril: 5.0 km
             </span>
           </div>
 
-          <div className="flex items-center gap-2.5">
-            <span className="text-[11px] font-mono text-zinc-300 bg-zinc-900 border border-zinc-800 px-2.5 py-0.5 rounded-full">
-              Radius Steril: 5.0 km
-            </span>
-            
-            <button
-              id="roadmap-header-btn"
-              onClick={onOpenRoadmap}
-              className="px-2.5 py-1 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-white transition-all flex items-center gap-1.5 text-[11px] font-semibold"
-              title="Langkah integrasi data dan peta dunia nyata"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Langkah ke Peta Nyata</span>
-              <span className="sm:hidden">Peta Nyata</span>
-            </button>
+          {/* Right: Quick Scientific Tools Bar */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            {/* Intro Walkthrough Button */}
+            {onOpenIntro && (
+              <button
+                id="intro-header-btn"
+                onClick={onOpenIntro}
+                className="px-2.5 py-1 rounded-lg border border-amber-500/40 bg-amber-950/40 hover:bg-amber-900/60 text-amber-200 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-semibold shadow-sm whitespace-nowrap"
+                title="Buka Layar Intro & Panduan Lengkap SimKratoa"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Intro SimKratoa</span>
+              </button>
+            )}
+
+            {/* New: Aerosol & SO2 Physics Calculator & Animation */}
+            {onOpenAerosol && (
+              <button
+                id="aerosol-header-btn"
+                onClick={onOpenAerosol}
+                className="px-2.5 py-1 rounded-lg border border-sky-500/40 bg-sky-950/40 hover:bg-sky-900/60 text-sky-200 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-semibold shadow-sm whitespace-nowrap"
+                title="Buka Kalkulator & Simulasi Dinamika Aerosol Vulkanik (SO2 -> H2SO4, AOD, Radiative Forcing)"
+              >
+                <span>🧪</span>
+                <span>Aerosol & SO₂</span>
+              </button>
+            )}
+
+            {onOpenWeather && (
+              <button
+                id="weather-header-btn"
+                onClick={onOpenWeather}
+                className="px-2.5 py-1 rounded-lg border border-zinc-800 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-medium shadow-sm whitespace-nowrap"
+                title="Buka Kondisi Cuaca & Sounding Angin Real-Time Anak Krakatau"
+              >
+                <Wind className="w-3.5 h-3.5 text-sky-400" />
+                <span>{weather ? `${weather.wind.speedMs} m/s (${weather.wind.directionCardinal.split(' ')[0]})` : 'Cuaca'}</span>
+              </button>
+            )}
 
             {onOpenBmkg && (
               <button
                 id="bmkg-header-btn"
                 onClick={onOpenBmkg}
-                className="px-2.5 py-1 rounded-lg border border-zinc-600 bg-zinc-900 hover:bg-zinc-800 text-white transition-all flex items-center gap-1.5 text-[11px] font-semibold shadow-sm"
-                title="Buka Pusat Data BMKG & Analisis Daerah Terdampak"
+                className="px-2.5 py-1 rounded-lg border border-zinc-800 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-medium shadow-sm whitespace-nowrap"
+                title="Buka Pusat Data BMKG & Analisis 10 Daerah Terdampak"
               >
-                <Radio className="w-3.5 h-3.5 text-white" />
-                <span className="hidden sm:inline">Data BMKG (10 Daerah)</span>
+                <Radio className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Data BMKG</span>
                 <span className="sm:hidden">BMKG</span>
               </button>
             )}
 
+            {onOpenAshDetail && (
+              <button
+                id="ash-header-btn"
+                onClick={onOpenAshDetail}
+                className="px-2.5 py-1 rounded-lg border border-zinc-800 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-medium shadow-sm whitespace-nowrap"
+                title="Buka Matriks Sebaran Abu & Estimasi Ketebalan Isopach"
+              >
+                <span>☁️</span>
+                <span className="hidden sm:inline">Sebaran Abu</span>
+                <span className="sm:hidden">Abu</span>
+              </button>
+            )}
+
+            {onOpenEjectaDetail && (
+              <button
+                id="ejecta-header-btn"
+                onClick={onOpenEjectaDetail}
+                className="px-2.5 py-1 rounded-lg border border-zinc-800 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-medium shadow-sm whitespace-nowrap"
+                title="Buka Katalog Lengkap & Telemetri Lemparan Bom Vulkanik"
+              >
+                <span>💥</span>
+                <span className="hidden sm:inline">Bom Balistik</span>
+                <span className="sm:hidden">Bom</span>
+              </button>
+            )}
+
+            {onOpenExportPdf && (
+              <button
+                id="export-pdf-header-btn"
+                onClick={onOpenExportPdf}
+                className="px-2.5 py-1 rounded-lg border border-red-500/40 bg-red-950/40 hover:bg-red-900/60 text-red-200 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-semibold shadow-sm whitespace-nowrap"
+                title="Ekspor Laporan Resmi Simulasi Erupsi ke Format Dokumen PDF (A4)"
+              >
+                <FileText className="w-3.5 h-3.5 text-red-400" />
+                <span>Ekspor PDF</span>
+              </button>
+            )}
+
+            <button
+              id="roadmap-header-btn"
+              onClick={onOpenRoadmap}
+              className="px-2.5 py-1 rounded-lg border border-zinc-800 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-medium whitespace-nowrap"
+              title="Langkah integrasi data dan peta dunia nyata"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Peta Nyata</span>
+            </button>
+
+            <div className="h-3 w-px bg-zinc-800 mx-0.5 hidden sm:block" />
+
+            {/* Audio Toggle Button */}
             <button
               id="mute-sound-btn"
               onClick={onToggleMute}
-              className={`p-1.5 px-2 rounded-lg border transition-all flex items-center gap-1.5 text-[11px] ${
+              className={`p-1 px-2 rounded-lg border transition-all flex items-center gap-1 text-[11px] whitespace-nowrap ${
                 isMuted
-                  ? 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-white hover:border-zinc-700'
+                  ? 'border-zinc-800 bg-zinc-900/80 text-zinc-400 hover:text-white hover:border-zinc-700'
                   : 'border-white/30 bg-white text-black font-semibold hover:bg-zinc-200'
               }`}
               title={isMuted ? 'Aktifkan Suara Erupsi' : 'Bisukan Suara'}
@@ -107,9 +203,9 @@ export const Header: React.FC<HeaderProps> = ({
               {isMuted ? (
                 <VolumeX className="w-3.5 h-3.5 text-zinc-400" />
               ) : (
-                <Volume2 className="w-3.5 h-3.5 text-black animate-pulse" />
+                <Volume2 className="w-3.5 h-3.5 text-black" />
               )}
-              <span className="font-medium">{isMuted ? 'Muted' : 'Audio On'}</span>
+              <span className="hidden sm:inline">{isMuted ? 'Mute' : 'Sound'}</span>
             </button>
           </div>
         </div>
@@ -119,20 +215,29 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
         {/* Brand identity */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-white text-black p-0.5 shadow-lg shadow-white/5 flex items-center justify-center">
-            <Flame className="w-5 h-5 text-black" />
-          </div>
+          <button
+            id="brand-intro-btn"
+            onClick={onOpenIntro}
+            className="w-10 h-10 rounded-xl bg-white text-black p-0.5 shadow-lg shadow-white/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white"
+            title="Buka Layar Intro & Panduan SimKratoa"
+          >
+            <Flame className="w-5 h-5 text-black fill-black" />
+          </button>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-bold tracking-tight text-white">
-                Krakatau Fisika Erupsi
+              <h1 className="text-base sm:text-xl font-extrabold tracking-tight text-white flex items-center gap-1.5">
+                <span>SimKratoa</span>
               </h1>
-              <span className="text-[10px] uppercase font-mono px-2 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-md">
-                v2.1 • RK4
+              <span className="text-[10px] uppercase font-mono px-2 py-0.5 bg-red-950/80 border border-red-800 text-red-300 font-bold rounded-md flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                SIAGA (III)
+              </span>
+              <span className="text-[10px] uppercase font-mono px-2 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-md hidden sm:inline-block">
+                RK4 • 3D
               </span>
             </div>
             <p className="text-xs text-zinc-400">
-              Simulasi Dinamika Balistik Vulkanik & Pemodelan Dispersi Asap
+              Platform Simulasi Fisika Erupsi G. Anak Krakatau & Mitigasi Selat Sunda
             </p>
           </div>
         </div>
@@ -194,6 +299,19 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {onOpenExportPdf && (
+            <button
+              id="export-pdf-main-btn"
+              onClick={onOpenExportPdf}
+              className="px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-750 hover:bg-zinc-800 hover:border-zinc-600 text-zinc-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+              title="Unduh / Cetak Laporan PDF Resmi Simulasi Erupsi"
+            >
+              <FileText className="w-3.5 h-3.5 text-red-400" />
+              <span className="hidden sm:inline">Laporan</span>
+              <span>PDF</span>
+            </button>
+          )}
+
           <button
             id="launch-eruption-btn"
             onClick={onTriggerEruption}

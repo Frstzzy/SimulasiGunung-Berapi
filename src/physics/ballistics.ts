@@ -294,6 +294,105 @@ export function computeTrajectory3D(
   };
 }
 
+export interface ShowerBomb {
+  id: number;
+  label: string;
+  rockDiameter: number;
+  rockMassKg: number;
+  launchAngle: number;
+  launchAzimuth: number;
+  initialVelocity: number;
+  color: string;
+  traj: ReturnType<typeof computeTrajectory3D>;
+}
+
+/**
+ * Computes a realistic multi-projectile shower of volcanic ejecta/bombs
+ */
+export function computeBallisticShower(
+  params: BallisticParams,
+  primaryAzimuthDeg: number,
+  windSpeed: number = 0,
+  windDirDeg: number = 0,
+  count: number = 7,
+  dispersionMode: 'focused' | 'radial' = 'focused'
+): ShowerBomb[] {
+  const result: ShowerBomb[] = [];
+  const palette = [
+    '#f97316', // Orange
+    '#ef4444', // Red
+    '#f59e0b', // Amber
+    '#eab308', // Yellow
+    '#ec4899', // Pink
+    '#8b5cf6', // Violet
+    '#06b6d4', // Cyan
+    '#10b981', // Emerald
+    '#f43f5e', // Rose
+    '#fb923c', // Tangerine
+  ];
+
+  for (let i = 0; i < count; i++) {
+    const isPrimary = i === 0;
+
+    let azim = primaryAzimuthDeg;
+    let angle = params.launchAngle;
+    let v0 = params.initialVelocity;
+    let diam = params.rockDiameter;
+
+    if (!isPrimary) {
+      if (dispersionMode === 'radial') {
+        const step = 360 / Math.max(1, count - 1);
+        azim = (primaryAzimuthDeg + i * step + Math.sin(i * 1.7) * 12 + 360) % 360;
+      } else {
+        // Focused directional cluster within ±35°
+        const offset = Math.sin(i * 2.3) * 35;
+        azim = (primaryAzimuthDeg + offset + 360) % 360;
+      }
+
+      // Natural spread in elevation angle (32° to 82°)
+      const angleVar = Math.cos(i * 3.1) * 14;
+      angle = Math.max(30, Math.min(85, params.launchAngle + angleVar));
+
+      // Natural spread in initial speed (72% to 118% of v0)
+      const vFactor = 0.72 + ((i * 37) % 47) / 100;
+      v0 = Math.max(40, params.initialVelocity * vFactor);
+
+      // Natural fragment size variation (lapilli 0.12m to massive bomb)
+      const sizeFactor = 0.35 + ((i * 19) % 65) / 50;
+      diam = Math.max(0.1, params.rockDiameter * sizeFactor);
+    }
+
+    const { mass } = getRockProperties(diam, params.rockDensity);
+
+    const traj = computeTrajectory3D(
+      {
+        ...params,
+        launchAngle: angle,
+        initialVelocity: v0,
+        rockDiameter: diam,
+      },
+      azim,
+      windSpeed,
+      windDirDeg,
+      params.enableAirDrag
+    );
+
+    result.push({
+      id: i,
+      label: isPrimary ? 'Bom Utama (Fokus)' : `Fragmen #${i + 1}`,
+      rockDiameter: Math.round(diam * 100) / 100,
+      rockMassKg: Math.round(mass),
+      launchAngle: Math.round(angle * 10) / 10,
+      launchAzimuth: Math.round(azim * 10) / 10,
+      initialVelocity: Math.round(v0),
+      color: palette[i % palette.length],
+      traj,
+    });
+  }
+
+  return result;
+}
+
 /**
  * Precomputes full trajectory path with high resolution
  */
@@ -389,7 +488,18 @@ export function computeIdealParabola(params: BallisticParams) {
   const flightTime = (vy + Math.sqrt(discriminant)) / g;
   const maxRange = vx * flightTime;
 
+  // Analytical points along the ideal vacuum trajectory
+  const points: { x: number; y: number }[] = [];
+  const steps = 60;
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / steps) * flightTime;
+    const x = vx * t;
+    const y = Math.max(0, y0 + vy * t - 0.5 * g * t * t);
+    points.push({ x, y });
+  }
+
   return {
+    points,
     maxRange,
     maxAltitude,
     flightTime,

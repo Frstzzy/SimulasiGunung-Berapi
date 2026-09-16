@@ -25,6 +25,7 @@ import { GEOLOGICAL_LANDMARKS, GeologicalLandmark3D } from '../data/landmarks';
 import { Map3DZoomBar } from './Map3DZoomBar';
 import { LandmarkDetailModal } from './LandmarkDetailModal';
 import { AshDispersalControlCard } from './AshDispersalControlCard';
+import { CraterEruptionDetailHUD } from './CraterEruptionDetailHUD';
 
 interface SundaStrait3DMapCanvasProps {
   ballistic: BallisticParams;
@@ -63,6 +64,14 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
   const [showAshCloud3D, setShowAshCloud3D] = useState<boolean>(true);
   const [showAshFootprint, setShowAshFootprint] = useState<boolean>(true);
 
+  // Volcanic Ash Smoke & Crater Eruption Detail Toggles
+  const [showVolcanicLightning, setShowVolcanicLightning] = useState<boolean>(true);
+  const [showAshRain, setShowAshRain] = useState<boolean>(true);
+  const [showAltitudeGauge, setShowAltitudeGauge] = useState<boolean>(true);
+  const [showPyroclasticFlow, setShowPyroclasticFlow] = useState<boolean>(true);
+  const [showHazardZones, setShowHazardZones] = useState<boolean>(true);
+  const [showCraterHud, setShowCraterHud] = useState<boolean>(true);
+
   // Zoom & Geological Controls
   const [zoomDistance, setZoomDistance] = useState<number>(1100);
   const [scrollSensitivity, setScrollSensitivity] = useState<'fine' | 'normal' | 'fast'>('normal');
@@ -95,11 +104,18 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
   const oceanMeshRef = useRef<THREE.Mesh | null>(null);
   const plumeParticlesRef = useRef<{ mesh: THREE.InstancedMesh; data: any[] } | null>(null);
+  const ashRainParticlesRef = useRef<{ mesh: THREE.InstancedMesh; data: any[] } | null>(null);
+  const lightningMeshRef = useRef<THREE.Line | null>(null);
+  const lightningLightRef = useRef<THREE.PointLight | null>(null);
+  const pyroclasticParticlesRef = useRef<{ mesh: THREE.InstancedMesh; data: any[] } | null>(null);
+  const altitudeGaugeGroupRef = useRef<THREE.Group | null>(null);
+  const hazardRingsGroupRef = useRef<THREE.Group | null>(null);
   const ashFootprintMeshRef = useRef<THREE.Mesh | null>(null);
   const fumaroleParticlesRef = useRef<{ mesh: THREE.InstancedMesh; data: any[] } | null>(null);
   const bombShowerRef = useRef<any[]>([]);
   const splashRingsRef = useRef<any[]>([]);
   const shipMeshRef = useRef<THREE.Group | null>(null);
+  const lightningCooldownRef = useRef<number>(1.8);
 
   // Real-time calculated downwind reach in kilometers
   const downwindReachKm = Math.min(65, 8 + (plume.windSpeed * 3.6) * 0.45);
@@ -130,6 +146,20 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
     const orbit = orbitRef.current;
 
     switch (preset) {
+      case 'crater': // Close-up into active vent and magma lake
+        orbit.destTarget.set(0, 110, 0);
+        orbit.targetRadius = 380;
+        orbit.targetTheta = 0.65;
+        orbit.targetPhi = 0.95;
+        break;
+
+      case 'rim': // Overlook from 157 mdpl crater rim
+        orbit.destTarget.set(0, 157, 0);
+        orbit.targetRadius = 650;
+        orbit.targetTheta = 1.35;
+        orbit.targetPhi = 1.15;
+        break;
+
       case 'krakatau': // Close-up on Anak Krakatau crater
         orbit.destTarget.set(0, 157, 0);
         orbit.targetRadius = 1100;
@@ -769,15 +799,21 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
     // -----------------------------------------------------------
     // 3D VOLCANIC ASH PLUME & ADVECTION-DISPERSION SYSTEM
     // -----------------------------------------------------------
-    const particleCount = 260;
+    const particleCount = 420;
     const pSphereGeo = new THREE.SphereGeometry(1, 8, 8);
     const pSphereMat = new THREE.MeshStandardMaterial({
-      color: 0x4b5563,
-      roughness: 0.95,
+      roughness: 0.96,
+      metalness: 0.05,
       transparent: true,
-      opacity: 0.62,
+      opacity: 0.75,
+      vertexColors: false,
     });
     const plumeInstanced = new THREE.InstancedMesh(pSphereGeo, pSphereMat, particleCount);
+    plumeInstanced.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(particleCount * 3), 3);
+    for (let i = 0; i < particleCount; i++) {
+      plumeInstanced.setColorAt(i, new THREE.Color(0x3f3f46));
+    }
+    if (plumeInstanced.instanceColor) plumeInstanced.instanceColor.needsUpdate = true;
     scene.add(plumeInstanced);
 
     const plumeData = [];
@@ -787,31 +823,195 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
 
     for (let i = 0; i < particleCount; i++) {
       const initialProgress = i / particleCount;
-      const initialDist = initialProgress * Math.min(42000, 8000 + plume.windSpeed * 1400);
+      const initialDist = initialProgress * Math.min(45000, 8000 + plume.windSpeed * 1500);
 
       const isDrift = initialProgress > 0.22;
-      const isUmbrella = initialProgress > 0.12 && !isDrift;
+      const isUmbrella = initialProgress > 0.11 && !isDrift;
 
       plumeData.push({
-        x: isDrift ? initDirX * initialDist + (Math.random() - 0.5) * (initialDist * 0.35 + 80) : (Math.random() - 0.5) * 40,
+        x: isDrift ? initDirX * initialDist + (Math.random() - 0.5) * (initialDist * 0.35 + 90) : (Math.random() - 0.5) * 45,
         y: isDrift ? Math.max(80, 157 + plume.columnHeight * (1 - initialProgress * 0.4) - Math.random() * 300) : 157 + Math.random() * 80,
-        z: isDrift ? initDirZ * initialDist + (Math.random() - 0.5) * (initialDist * 0.35 + 80) : (Math.random() - 0.5) * 40,
-        vx: (Math.random() - 0.5) * 8,
-        vy: 20 + Math.random() * 28,
-        vz: (Math.random() - 0.5) * 8,
-        turbX: (Math.random() - 0.5) * 25,
-        turbZ: (Math.random() - 0.5) * 25,
-        settlingRate: 15 + Math.random() * 25,
-        scale: 18 + initialProgress * 420 + Math.random() * 30,
+        z: isDrift ? initDirZ * initialDist + (Math.random() - 0.5) * (initialDist * 0.35 + 90) : (Math.random() - 0.5) * 45,
+        vx: (Math.random() - 0.5) * 9,
+        vy: 22 + Math.random() * 32,
+        vz: (Math.random() - 0.5) * 9,
+        turbX: (Math.random() - 0.5) * 28,
+        turbZ: (Math.random() - 0.5) * 28,
+        settlingRate: 14 + Math.random() * 26,
+        scale: 18 + initialProgress * 440 + Math.random() * 35,
         life: Math.random(),
-        age: initialProgress * 20,
-        maxLife: 22 + Math.random() * 12,
+        age: initialProgress * 22,
+        maxLife: 24 + Math.random() * 14,
         phase: isDrift ? 'drift' : isUmbrella ? 'umbrella' : 'column',
-        radialSpeed: 15 + Math.random() * 25,
+        radialSpeed: 16 + Math.random() * 28,
         radialAngle: Math.random() * Math.PI * 2,
       });
     }
     plumeParticlesRef.current = { mesh: plumeInstanced, data: plumeData };
+
+    // -----------------------------------------------------------
+    // VOLCANIC ASH FALLOUT / RAIN CURTAINS (GRAVITATIONAL SETTLING)
+    // -----------------------------------------------------------
+    const ashRainCount = 220;
+    const ashRainGeo = new THREE.SphereGeometry(1, 4, 4);
+    const ashRainMat = new THREE.MeshBasicMaterial({
+      color: 0x333238,
+      transparent: true,
+      opacity: 0.65,
+    });
+    const ashRainInstanced = new THREE.InstancedMesh(ashRainGeo, ashRainMat, ashRainCount);
+    scene.add(ashRainInstanced);
+
+    const ashRainData = [];
+    for (let i = 0; i < ashRainCount; i++) {
+      const pDist = Math.random() * Math.min(38000, 6000 + plume.windSpeed * 1300);
+      ashRainData.push({
+        x: initDirX * pDist + (Math.random() - 0.5) * (pDist * 0.4 + 120),
+        y: Math.random() * (157 + plume.columnHeight * 0.85),
+        z: initDirZ * pDist + (Math.random() - 0.5) * (pDist * 0.4 + 120),
+        fallSpeed: 18 + Math.random() * 36,
+        driftX: (Math.random() - 0.5) * 12,
+        driftZ: (Math.random() - 0.5) * 12,
+        scale: 3.5 + Math.random() * 5.5,
+      });
+    }
+    ashRainParticlesRef.current = { mesh: ashRainInstanced, data: ashRainData };
+
+    // -----------------------------------------------------------
+    // VOLCANIC LIGHTNING FLASH SYSTEM IN ASH CLOUD
+    // -----------------------------------------------------------
+    const lightningMat = new THREE.LineBasicMaterial({
+      color: 0xc7d2fe,
+      transparent: true,
+      opacity: 0,
+      linewidth: 2,
+    });
+    const lightningLine = new THREE.Line(new THREE.BufferGeometry(), lightningMat);
+    scene.add(lightningLine);
+    lightningMeshRef.current = lightningLine;
+
+    const lightningLight = new THREE.PointLight(0xa5b4fc, 0, 5000, 1.4);
+    lightningLight.position.set(0, 500, 0);
+    scene.add(lightningLight);
+    lightningLightRef.current = lightningLight;
+
+    // -----------------------------------------------------------
+    // PYROCLASTIC DENSITY CURRENTS (AWAN PANAS GUGURAN ON FLANKS)
+    // -----------------------------------------------------------
+    const pdcCount = 80;
+    const pdcGeo = new THREE.SphereGeometry(1, 6, 6);
+    const pdcMat = new THREE.MeshStandardMaterial({
+      color: 0x475569,
+      roughness: 0.95,
+      transparent: true,
+      opacity: 0.7,
+    });
+    const pdcInstanced = new THREE.InstancedMesh(pdcGeo, pdcMat, pdcCount);
+    scene.add(pdcInstanced);
+
+    const pdcData = [];
+    // Paths down the southwestern breached scarp and eastern flank to sea level
+    for (let i = 0; i < pdcCount; i++) {
+      const isSouthwest = i % 2 === 0;
+      pdcData.push({
+        startX: (Math.random() - 0.5) * 20,
+        startY: 155,
+        startZ: (Math.random() - 0.5) * 20,
+        endX: isSouthwest ? -350 - Math.random() * 200 : 380 + Math.random() * 180,
+        endY: 0,
+        endZ: isSouthwest ? -300 - Math.random() * 200 : 250 + Math.random() * 200,
+        progress: Math.random(),
+        speed: 0.2 + Math.random() * 0.25,
+        initScale: 6 + Math.random() * 8,
+        scale: 6,
+        x: 0,
+        y: 155,
+        z: 0,
+      });
+    }
+    pyroclasticParticlesRef.current = { mesh: pdcInstanced, data: pdcData };
+
+    // -----------------------------------------------------------
+    // 3D VERTICAL ALTITUDE GAUGE (MISTAR KETINGGIAN ERUPSI 3D)
+    // -----------------------------------------------------------
+    const altGaugeGroup = new THREE.Group();
+    altGaugeGroup.position.set(-160, 0, 0);
+
+    // Vertical translucent cyan mast
+    const mastGeo = new THREE.CylinderGeometry(1.8, 1.8, 4800, 8);
+    mastGeo.translate(0, 2400, 0);
+    const mastMat = new THREE.MeshBasicMaterial({
+      color: 0x06b6d4,
+      transparent: true,
+      opacity: 0.5,
+    });
+    const mastMesh = new THREE.Mesh(mastGeo, mastMat);
+    altGaugeGroup.add(mastMesh);
+
+    // Altitude tick marks every 500m up to 4500m
+    for (let h = 500; h <= 4500; h += 500) {
+      const isMajor = h % 1000 === 0;
+      const tickGeo = new THREE.BoxGeometry(isMajor ? 60 : 35, 2.5, 2.5);
+      const tickMat = new THREE.MeshBasicMaterial({
+        color: isMajor ? 0xffffff : 0x38bdf8,
+        transparent: true,
+        opacity: isMajor ? 0.9 : 0.65,
+      });
+      const tick = new THREE.Mesh(tickGeo, tickMat);
+      tick.position.set(isMajor ? 30 : 18, h, 0);
+      altGaugeGroup.add(tick);
+    }
+    scene.add(altGaugeGroup);
+    altitudeGaugeGroupRef.current = altGaugeGroup;
+
+    // -----------------------------------------------------------
+    // 3D CRATER HAZARD PERIMETER RINGS (RADIUS STERIL KRB III)
+    // -----------------------------------------------------------
+    const hazardGroup = new THREE.Group();
+
+    // 1.5 km Exclusion Zone at Sea Level (Red glowing perimeter)
+    const hazardRingGeo = new THREE.RingGeometry(1485, 1515, 64);
+    hazardRingGeo.rotateX(-Math.PI / 2);
+    const hazardRingMat = new THREE.MeshBasicMaterial({
+      color: 0xef4444,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+    });
+    const hazardRingMesh = new THREE.Mesh(hazardRingGeo, hazardRingMat);
+    hazardRingMesh.position.y = 1.8;
+    hazardGroup.add(hazardRingMesh);
+
+    // Crater Rim 500m Perimeter at 157 mdpl (Yellow/Orange ring)
+    const rimRingGeo = new THREE.RingGeometry(490, 508, 48);
+    rimRingGeo.rotateX(-Math.PI / 2);
+    const rimRingMat = new THREE.MeshBasicMaterial({
+      color: 0xf59e0b,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+    });
+    const rimRingMesh = new THREE.Mesh(rimRingGeo, rimRingMat);
+    rimRingMesh.position.y = 120;
+    hazardGroup.add(rimRingMesh);
+
+    // Active Vent Glowing Thermal Edge
+    const ventRimGeo = new THREE.RingGeometry(25, 34, 32);
+    ventRimGeo.rotateX(-Math.PI / 2);
+    const ventRimMat = new THREE.MeshBasicMaterial({
+      color: 0xff4500,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85,
+    });
+    const ventRimMesh = new THREE.Mesh(ventRimGeo, ventRimMat);
+    ventRimMesh.position.set(0, 157.2, 0);
+    hazardGroup.add(ventRimMesh);
+
+    scene.add(hazardGroup);
+    hazardRingsGroupRef.current = hazardGroup;
 
     // -----------------------------------------------------------
     // DYNAMIC SURFACE ASH FALLOUT FOOTPRINT (ISOPACH DEPOSITION FAN)
@@ -1215,6 +1415,140 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
               }
             }
 
+            // Realistic Multi-Phase Volcanic Smoke & Ash Color Gradation
+            if (p.phase === 'column') {
+              if (p.y < 280) {
+                // Incandescent vent gas thrust jet
+                const hot = Math.max(0, (280 - p.y) / 123);
+                mesh.setColorAt(i, new THREE.Color(0.95 * hot + 0.18 * (1 - hot), 0.32 * hot + 0.16 * (1 - hot), 0.08 * hot + 0.16 * (1 - hot)));
+              } else {
+                // Heavy dark andesitic ash
+                mesh.setColorAt(i, new THREE.Color(0.18, 0.18, 0.19));
+              }
+            } else if (p.phase === 'umbrella') {
+              // Silicate ash umbrella cloud
+              mesh.setColorAt(i, new THREE.Color(0.28, 0.27, 0.29));
+            } else {
+              // Downwind drift: fading into sulfate aerosol haze
+              const driftProgress = Math.min(1.0, Math.hypot(p.x, p.z) / 35000);
+              mesh.setColorAt(i, new THREE.Color(0.32 + driftProgress * 0.24, 0.33 + driftProgress * 0.26, 0.36 + driftProgress * 0.3));
+            }
+
+            dummyObj.position.set(p.x, p.y, p.z);
+            dummyObj.scale.set(p.scale, p.scale, p.scale);
+            dummyObj.updateMatrix();
+            mesh.setMatrixAt(i, dummyObj.matrix);
+          }
+          mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        }
+      }
+
+      // 5b. Animate Real-Time Surface Ash Fallout Footprint Mesh
+      if (ashFootprintMeshRef.current) {
+        ashFootprintMeshRef.current.visible = showAshFootprint;
+        if (showAshFootprint) {
+          const windRad = (plume.windDirection * Math.PI) / 180;
+          ashFootprintMeshRef.current.rotation.y = -windRad;
+          const scaleDist = Math.max(0.4, Math.min(2.0, (10000 + plume.windSpeed * 1500) / 25000));
+          ashFootprintMeshRef.current.scale.set(scaleDist * 0.9, 1, scaleDist);
+        }
+      }
+
+      // 5c. Animate Volcanic Ash Rain (Falling Ash Curtains)
+      if (ashRainParticlesRef.current) {
+        const { mesh, data } = ashRainParticlesRef.current;
+        mesh.visible = showAshRain && showAshCloud3D;
+        if (showAshRain && showAshCloud3D) {
+          const windRad = (plume.windDirection * Math.PI) / 180;
+          const windDirX = Math.sin(windRad);
+          const windDirZ = -Math.cos(windRad);
+          const windVelocity = plume.windSpeed;
+
+          for (let i = 0; i < data.length; i++) {
+            const r = data[i];
+            r.y -= r.fallSpeed * dt;
+            r.x += (windDirX * windVelocity * 24 + r.driftX) * dt;
+            r.z += (windDirZ * windVelocity * 24 + r.driftZ) * dt;
+
+            if (r.y <= 2) {
+              const pDist = Math.random() * Math.min(38000, 6000 + windVelocity * 1300);
+              r.x = windDirX * pDist + (Math.random() - 0.5) * (pDist * 0.4 + 120);
+              r.y = 157 + plume.columnHeight * (0.55 + Math.random() * 0.45);
+              r.z = windDirZ * pDist + (Math.random() - 0.5) * (pDist * 0.4 + 120);
+            }
+
+            dummyObj.position.set(r.x, r.y, r.z);
+            dummyObj.scale.set(r.scale, r.scale, r.scale);
+            dummyObj.updateMatrix();
+            mesh.setMatrixAt(i, dummyObj.matrix);
+          }
+          mesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+
+      // 5d. Animate Volcanic Lightning in Ash Plume
+      if (lightningMeshRef.current && lightningLightRef.current) {
+        const mesh = lightningMeshRef.current;
+        const light = lightningLightRef.current;
+        if (!showVolcanicLightning || !showAshCloud3D) {
+          mesh.visible = false;
+          light.intensity = 0;
+        } else {
+          lightningCooldownRef.current -= dt;
+          if (lightningCooldownRef.current <= 0) {
+            lightningCooldownRef.current = 1.6 + Math.random() * 2.4;
+            mesh.visible = true;
+
+            const pts: THREE.Vector3[] = [];
+            let lx = (Math.random() - 0.5) * 55;
+            let ly = 240 + Math.random() * Math.min(plume.columnHeight * 0.8, 2200);
+            let lz = (Math.random() - 0.5) * 55;
+            pts.push(new THREE.Vector3(lx, ly, lz));
+
+            const segs = 8 + Math.floor(Math.random() * 5);
+            const segStepY = ly / segs;
+            for (let s = 0; s < segs; s++) {
+              lx += (Math.random() - 0.5) * 65;
+              ly -= segStepY * (0.8 + Math.random() * 0.4);
+              lz += (Math.random() - 0.5) * 65;
+              pts.push(new THREE.Vector3(lx, Math.max(160, ly), lz));
+            }
+
+            mesh.geometry.dispose();
+            mesh.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+            (mesh.material as THREE.LineBasicMaterial).opacity = 1.0;
+
+            light.position.set(lx, pts[0].y * 0.65, lz);
+            light.intensity = 22.0;
+          } else {
+            const mat = mesh.material as THREE.LineBasicMaterial;
+            mat.opacity = Math.max(0, mat.opacity - dt * 4.8);
+            light.intensity = Math.max(0, light.intensity - dt * 85);
+            if (mat.opacity <= 0.05) {
+              mesh.visible = false;
+            }
+          }
+        }
+      }
+
+      // 5e. Animate Pyroclastic Density Current Avalanches (Awan Panas Guguran)
+      if (pyroclasticParticlesRef.current) {
+        const { mesh, data } = pyroclasticParticlesRef.current;
+        mesh.visible = showPyroclasticFlow;
+        if (showPyroclasticFlow) {
+          for (let i = 0; i < data.length; i++) {
+            const p = data[i];
+            p.progress += dt * p.speed;
+            if (p.progress >= 1.0) {
+              p.progress = 0;
+              p.scale = p.initScale;
+            }
+            p.x = p.startX + (p.endX - p.startX) * p.progress + (Math.random() - 0.5) * (p.progress * 30);
+            p.z = p.startZ + (p.endZ - p.startZ) * p.progress + (Math.random() - 0.5) * (p.progress * 30);
+            p.y = Math.max(0, p.startY + (p.endY - p.startY) * Math.pow(p.progress, 0.75) + Math.sin(p.progress * Math.PI) * (p.progress * 15));
+            p.scale = p.initScale + p.progress * 32;
+
             dummyObj.position.set(p.x, p.y, p.z);
             dummyObj.scale.set(p.scale, p.scale, p.scale);
             dummyObj.updateMatrix();
@@ -1224,17 +1558,12 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
         }
       }
 
-      // 5b. Animate Real-Time Surface Ash Fallout Footprint Mesh
-      if (ashFootprintMeshRef.current) {
-        ashFootprintMeshRef.current.visible = showAshFootprint;
-        if (showAshFootprint) {
-          const windRad = (plume.windDirection * Math.PI) / 180;
-          // Rotate footprint fan to match wind direction (0° North = -Z, 90° East = +X, 180° South = +Z, 270° West = -X)
-          ashFootprintMeshRef.current.rotation.y = -windRad;
-          // Scale length with wind speed (up to 45km reach)
-          const scaleDist = Math.max(0.4, Math.min(2.0, (10000 + plume.windSpeed * 1500) / 25000));
-          ashFootprintMeshRef.current.scale.set(scaleDist * 0.9, 1, scaleDist);
-        }
+      // 5f. Altitude Gauge & Hazard Rings Visibility
+      if (altitudeGaugeGroupRef.current) {
+        altitudeGaugeGroupRef.current.visible = showAltitudeGauge;
+      }
+      if (hazardRingsGroupRef.current) {
+        hazardRingsGroupRef.current.visible = showHazardZones;
       }
 
       // 6. Animate Cargo Ship along ALKI I
@@ -1253,7 +1582,20 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
 
     animId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animId);
-  }, [autoRotate, cameraPreset, lightingMode, plume, showGeologicalLabels, showAshCloud3D, showAshFootprint]);
+  }, [
+    autoRotate,
+    cameraPreset,
+    lightingMode,
+    plume,
+    showGeologicalLabels,
+    showAshCloud3D,
+    showAshFootprint,
+    showVolcanicLightning,
+    showAshRain,
+    showAltitudeGauge,
+    showPyroclasticFlow,
+    showHazardZones,
+  ]);
 
   // -------------------------------------------------------------
   // MOUSE & TOUCH ORBIT / ZOOM CONTROLS
@@ -1396,6 +1738,24 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
             )
         )}
 
+      {/* TOP CENTER: 3D CRATER ERUPTION DETAIL & TELEMETRY HUD */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+        <CraterEruptionDetailHUD
+          plume={plume}
+          onSelectPreset={applyCameraPreset}
+          showLightning={showVolcanicLightning}
+          onToggleLightning={() => setShowVolcanicLightning(!showVolcanicLightning)}
+          showAshRain={showAshRain}
+          onToggleAshRain={() => setShowAshRain(!showAshRain)}
+          showAltitudeGauge={showAltitudeGauge}
+          onToggleAltitudeGauge={() => setShowAltitudeGauge(!showAltitudeGauge)}
+          showPyroclasticFlow={showPyroclasticFlow}
+          onTogglePyroclasticFlow={() => setShowPyroclasticFlow(!showPyroclasticFlow)}
+          showHazardZones={showHazardZones}
+          onToggleHazardZones={() => setShowHazardZones(!showHazardZones)}
+        />
+      </div>
+
       {/* TOP LEFT: Quick Preset Camera Toolbar, Azimuth, and Ash Dispersal Control Card */}
       <div className="absolute top-4 left-4 flex flex-col gap-2.5 z-10 max-w-xs max-h-[calc(100%-2rem)] overflow-y-auto pr-1 scrollbar-none">
         <div className="bg-black/90 backdrop-blur-xl p-3.5 rounded-2xl border border-zinc-800 text-xs text-zinc-200 shadow-2xl space-y-3">
@@ -1412,12 +1772,14 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
           {/* Preset Buttons */}
           <div className="grid grid-cols-2 gap-1.5 text-[11px]">
             {[
-              { id: 'krakatau', label: '🌋 Kawah Anak Krakatau' },
+              { id: 'crater', label: '🌋 Kawah Dekat' },
+              { id: 'rim', label: '⛰️ Bibir Kawah 157m' },
+              { id: 'krakatau', label: '🏝️ Anak Krakatau' },
               { id: 'orbit', label: '🛰️ Orbit Selat Sunda' },
               { id: 'anyer', label: '🌅 Tampak Banten' },
               { id: 'kalianda', label: '⛰️ Tampak Lampung' },
               { id: 'ship', label: '🚢 Kapal ALKI I' },
-              { id: 'follow', label: '🎯 Ikuti Bom Vulkanik' },
+              { id: 'follow', label: '🎯 Ikuti Bom' },
             ].map((p) => (
               <button
                 key={p.id}
@@ -1597,7 +1959,67 @@ export const SundaStrait3DMapCanvas: React.FC<SundaStrait3DMapCanvasProps> = ({
               />
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-zinc-400" />
-                Awan Abu Vulkanik 3D ({plume.windSpeed} m/s)
+                Kolom & Payung Abu ({plume.windSpeed} m/s)
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+              <input
+                type="checkbox"
+                checked={showAshRain}
+                onChange={(e) => setShowAshRain(e.target.checked)}
+                className="rounded border-zinc-700 text-white focus:ring-0"
+              />
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
+                Hujan Abu Vulkanik & Tirai Jatuhan
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+              <input
+                type="checkbox"
+                checked={showVolcanicLightning}
+                onChange={(e) => setShowVolcanicLightning(e.target.checked)}
+                className="rounded border-zinc-700 text-white focus:ring-0"
+              />
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
+                Petir Vulkanik Awan Abu
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+              <input
+                type="checkbox"
+                checked={showPyroclasticFlow}
+                onChange={(e) => setShowPyroclasticFlow(e.target.checked)}
+                className="rounded border-zinc-700 text-white focus:ring-0"
+              />
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-600" />
+                Awan Panas Guguran (PDC) Lereng
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+              <input
+                type="checkbox"
+                checked={showHazardZones}
+                onChange={(e) => setShowHazardZones(e.target.checked)}
+                className="rounded border-zinc-700 text-white focus:ring-0"
+              />
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                Radius Bahaya 1.5 km (KRB III)
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+              <input
+                type="checkbox"
+                checked={showAltitudeGauge}
+                onChange={(e) => setShowAltitudeGauge(e.target.checked)}
+                className="rounded border-zinc-700 text-white focus:ring-0"
+              />
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
+                Mistar Ketinggian Erupsi 3D
               </span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer hover:text-white">

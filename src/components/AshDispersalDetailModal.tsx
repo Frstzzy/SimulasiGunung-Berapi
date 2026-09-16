@@ -20,7 +20,8 @@ import {
   Plane,
   Ship,
   Sparkles,
-  Info
+  Info,
+  MapPin
 } from 'lucide-react';
 import { PlumeParams, BallisticParams } from '../types';
 
@@ -58,7 +59,7 @@ export const AshDispersalDetailModal: React.FC<AshDispersalDetailModalProps> = (
   plume = defaultPlume,
   ballistic = defaultBallistic,
 }) => {
-  const [activeTab, setActiveTab] = useState<'phases' | 'fractions' | 'physics' | 'mitigation'>('phases');
+  const [activeTab, setActiveTab] = useState<'fallout' | 'phases' | 'fractions' | 'physics' | 'mitigation'>('fallout');
 
   if (!isOpen) return null;
 
@@ -74,6 +75,82 @@ export const AshDispersalDetailModal: React.FC<AshDispersalDetailModalProps> = (
   const umbrellaRadiusKm = Math.min(12, Math.max(0.8, (columnHeight / 1000) * 0.52));
   const maxPlumeReachKm = Math.min(85, Math.max(12, (columnHeight / 1000) * 9.5 + windSpeed * 2.2));
   const driftAngleDeg = (windDirection + 180) % 360;
+
+  // Sunda Strait key monitoring locations
+  const LOCATIONS = [
+    { name: 'Kaldera Anak Krakatau', distKm: 0.5, bearingDeg: 0, desc: 'Pusat kawah erupsi & pulau gunungapi' },
+    { name: 'Pulau Panjang & Sertung', distKm: 3.5, bearingDeg: 315, desc: 'Kepulauan kaldera luar tak berpenghuni' },
+    { name: 'Pulau Rakata (Puncak)', distKm: 4.8, bearingDeg: 155, desc: 'Sisa dinding kaldera purba 1883 (813 mdpl)' },
+    { name: 'Pulau Sebesi (Desa Tejang)', distKm: 19.2, bearingDeg: 12, desc: 'Pulau berpenghuni ~3.000 jiwa terdekat' },
+    { name: 'Alur ALKI I (Selat Sunda)', distKm: 22.0, bearingDeg: 180, desc: 'Koridor pelayaran tanker & kargo internasional' },
+    { name: 'Pantai Carita / Labuan (Banten)', distKm: 43.5, bearingDeg: 102, desc: 'Pesisir wisata & permukiman padat Banten' },
+    { name: 'Pantai Anyer (Banten)', distKm: 52.0, bearingDeg: 82, desc: 'Pesisir barat Banten & infrastruktur pariwisata' },
+    { name: 'Pelabuhan Bakauheni (Lampung)', distKm: 48.0, bearingDeg: 345, desc: 'Dermaga penyeberangan kapal ferry Jawa-Sumatera' },
+    { name: 'Kota Kalianda (Lampung Sel.)', distKm: 50.5, bearingDeg: 330, desc: 'Ibu kota Kabupaten Lampung Selatan' },
+    { name: 'Kawasan Industri Cilegon & Merak', distKm: 68.0, bearingDeg: 70, desc: 'Kawasan industri petrokimia & pelabuhan Merak' },
+    { name: 'Kota Bandar Lampung', distKm: 95.0, bearingDeg: 325, desc: 'Pusat metropolitan provinsi Lampung' },
+  ];
+
+  // Calculate fallout matrix
+  const falloutMatrix = LOCATIONS.map((loc) => {
+    // Angular difference between location bearing and ash drift direction
+    const diff = Math.abs(((loc.bearingDeg - driftAngleDeg + 180 + 360) % 360) - 180);
+    const inDirectCone = diff <= 28;
+    const inOuterCone = diff <= 48;
+    const inUmbrella = loc.distKm <= umbrellaRadiusKm;
+
+    const isImpacted = inDirectCone || (inOuterCone && loc.distKm <= maxPlumeReachKm * 0.7) || inUmbrella;
+
+    // Estimated ash accumulation thickness in mm
+    let thicknessMm = 0;
+    let airborneConcMg = 0;
+    let etaMinutes = 0;
+
+    if (inUmbrella) {
+      // Very close to crater: dominated by umbrella cloud fallout
+      thicknessMm = Math.max(15, (columnHeight / 3000) * 80 * Math.exp(-loc.distKm / 2.5));
+      airborneConcMg = 25;
+      etaMinutes = Math.round(loc.distKm * 1.5);
+    } else if (isImpacted) {
+      // Gaussian downwind dispersion model (Pyle 1989)
+      const r = loc.distKm;
+      const decayK = 0.065;
+      const peakThickness = (columnHeight / 2500) * 45;
+      const lateralDecay = inDirectCone ? Math.cos((diff * Math.PI) / 60) : 0.25;
+      thicknessMm = peakThickness * Math.exp(-decayK * r) * lateralDecay;
+      thicknessMm = Math.max(0.1, thicknessMm);
+
+      airborneConcMg = Math.max(0.2, (columnHeight / 2000) * 12 * Math.exp(-0.04 * r) * lateralDecay);
+      etaMinutes = Math.round((loc.distKm / Math.max(2, windSpeedKmh)) * 60);
+    }
+
+    return {
+      ...loc,
+      diffDeg: diff,
+      isImpacted,
+      inUmbrella,
+      thicknessMm: Number(thicknessMm.toFixed(1)),
+      thicknessDisplay:
+        thicknessMm >= 10
+          ? `${(thicknessMm / 10).toFixed(1)} cm`
+          : thicknessMm > 0
+          ? `${thicknessMm.toFixed(1)} mm`
+          : '0 mm (Aman)',
+      airborneConcMg: Number(airborneConcMg.toFixed(2)),
+      etaMinutes,
+      etaDisplay: isImpacted ? (etaMinutes > 60 ? `T+${Math.floor(etaMinutes / 60)}j ${etaMinutes % 60}m` : `T+${etaMinutes}m`) : 'Aman (Luar Jalur)',
+      hazardLevel:
+        thicknessMm >= 50 || inUmbrella
+          ? 'CRITICAL'
+          : thicknessMm >= 10
+          ? 'HIGH'
+          : thicknessMm >= 1
+          ? 'MODERATE'
+          : isImpacted
+          ? 'LOW'
+          : 'SAFE',
+    };
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
@@ -109,10 +186,11 @@ export const AshDispersalDetailModal: React.FC<AshDispersalDetailModalProps> = (
         {/* Navigation Tabs */}
         <div className="flex border-b border-zinc-800 bg-zinc-900/50 px-4 sm:px-6 gap-1 sm:gap-2 overflow-x-auto no-scrollbar">
           {[
-            { id: 'phases', label: '1. Fase Pasca-Erupsi (Timeline)', icon: Clock },
-            { id: 'fractions', label: '2. Fraksinasi Partikel Abu', icon: Layers },
-            { id: 'physics', label: '3. Rumus & Model Fisika', icon: Activity },
-            { id: 'mitigation', label: '4. Mitigasi & Keselamatan', icon: ShieldAlert },
+            { id: 'fallout', label: '1. Matriks Sebaran & Ketebalan Abu', icon: MapPin },
+            { id: 'phases', label: '2. Fase Pasca-Erupsi (Timeline)', icon: Clock },
+            { id: 'fractions', label: '3. Fraksinasi Partikel Abu', icon: Layers },
+            { id: 'physics', label: '4. Rumus & Model Fisika', icon: Activity },
+            { id: 'mitigation', label: '5. Mitigasi & Keselamatan', icon: ShieldAlert },
           ].map((tab) => {
             const Icon = tab.icon;
             const isSelected = activeTab === tab.id;
@@ -135,6 +213,132 @@ export const AshDispersalDetailModal: React.FC<AshDispersalDetailModalProps> = (
 
         {/* Content Body */}
         <div className="p-4 sm:p-6 max-h-[70vh] overflow-y-auto space-y-6 text-xs sm:text-sm">
+          {/* TAB 0: MATRIKS SEBARAN & KETEBALAN ABU */}
+          {activeTab === 'fallout' && (
+            <div className="space-y-5">
+              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800 flex items-start gap-3">
+                <Info className="w-5 h-5 text-sky-400 flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-zinc-300 leading-relaxed">
+                  Matriks ini mengomputasi secara riil <strong>estimasi ketebalan endapan abu vulkanik (isopach)</strong>, konsentrasi partikel di udara, dan estimasi waktu tiba (ETA) di 11 lokasi kunci Selat Sunda berdasarkan arah tiupan angin saat ini (<strong>{driftAngleDeg}°</strong>) dan kecepatan angin (<strong>{windSpeed} m/s / {windSpeedKmh.toFixed(1)} km/j</strong>).
+                </div>
+              </div>
+
+              {/* Fallout Locations Table */}
+              <div className="overflow-x-auto rounded-xl border border-zinc-800">
+                <table className="w-full text-left text-xs font-sans">
+                  <thead className="bg-zinc-900 text-zinc-300 font-mono text-[11px] border-b border-zinc-800">
+                    <tr>
+                      <th className="p-3">Lokasi Pemantauan</th>
+                      <th className="p-3">Jarak & Arah</th>
+                      <th className="p-3">Status Sektor Angin</th>
+                      <th className="p-3">Ketebalan Abu (Isopach)</th>
+                      <th className="p-3">Konsentrasi Udara</th>
+                      <th className="p-3">Waktu Tiba (ETA)</th>
+                      <th className="p-3">Tingkat Bahaya</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-850 font-mono text-[11px] text-zinc-300">
+                    {falloutMatrix.map((item, idx) => (
+                      <tr
+                        key={idx}
+                        className={`transition-colors ${
+                          item.hazardLevel === 'CRITICAL'
+                            ? 'bg-red-950/20 hover:bg-red-900/30'
+                            : item.hazardLevel === 'HIGH'
+                            ? 'bg-amber-950/20 hover:bg-amber-900/30'
+                            : item.isImpacted
+                            ? 'bg-zinc-950/80 hover:bg-zinc-900/60'
+                            : 'bg-zinc-950/40 text-zinc-500 hover:bg-zinc-900/30'
+                        }`}
+                      >
+                        <td className="p-3 font-sans">
+                          <span className="font-bold text-white block">{item.name}</span>
+                          <span className="text-[10px] text-zinc-400 font-mono block">{item.desc}</span>
+                        </td>
+                        <td className="p-3">
+                          <span className="text-white font-bold">{item.distKm} km</span>
+                          <span className="text-zinc-400 block text-[10px]">{item.bearingDeg}°</span>
+                        </td>
+                        <td className="p-3 font-sans">
+                          {item.inUmbrella ? (
+                            <span className="text-purple-400 font-bold">☁️ Tudung Payung</span>
+                          ) : item.isImpacted ? (
+                            <span className="text-amber-400 font-medium">⚠️ Jalur Konus Angin (Δ{item.diffDeg.toFixed(0)}°)</span>
+                          ) : (
+                            <span className="text-zinc-500">✓ Luar Jalur (Δ{item.diffDeg.toFixed(0)}°)</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <span className={`font-bold ${item.thicknessMm >= 10 ? 'text-red-400' : item.thicknessMm >= 1 ? 'text-amber-300' : item.thicknessMm > 0 ? 'text-white' : 'text-zinc-500'}`}>
+                            {item.thicknessDisplay}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          {item.airborneConcMg > 0 ? (
+                            <span>
+                              <strong className="text-white">{item.airborneConcMg}</strong> mg/m³
+                            </span>
+                          ) : (
+                            <span className="text-zinc-500">&lt; 0.01 mg/m³</span>
+                          )}
+                        </td>
+                        <td className="p-3 font-bold text-zinc-200">
+                          {item.etaDisplay}
+                        </td>
+                        <td className="p-3 font-sans">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              item.hazardLevel === 'CRITICAL'
+                                ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                                : item.hazardLevel === 'HIGH'
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                : item.hazardLevel === 'MODERATE'
+                                ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40'
+                                : item.hazardLevel === 'LOW'
+                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                                : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                            }`}
+                          >
+                            {item.hazardLevel === 'CRITICAL'
+                              ? 'KRITIS (>5 cm)'
+                              : item.hazardLevel === 'HIGH'
+                              ? 'TINGGI (1-5 cm)'
+                              : item.hazardLevel === 'MODERATE'
+                              ? 'SEDANG (1-10 mm)'
+                              : item.hazardLevel === 'LOW'
+                              ? 'RINGAN (<1 mm)'
+                              : 'AMAN'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Protective Measures Brief */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-sans text-xs">
+                <div className="p-3 rounded-xl bg-zinc-900/50 border border-zinc-800 space-y-1">
+                  <span className="font-bold text-white block">😷 Perlindungan Pernapasan</span>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Wajib gunakan masker respirator N95/KN95 di wilayah &gt; 1 mm abu untuk mencegah iritasi silika tajam pada saluran bronkus.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-zinc-900/50 border border-zinc-800 space-y-1">
+                  <span className="font-bold text-white block">🏠 Integritas Atap & Air</span>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Tutup rapat tangki penampungan air bersih dari kontaminasi fluorida/asam. Bersihkan atap seng jika endapan mencapai &gt; 2 cm.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-zinc-900/50 border border-zinc-800 space-y-1">
+                  <span className="font-bold text-white block">🚢 Keselamatan ALKI I & Udara</span>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Nakhoda kapal diwajibkan menutup intake filter udara mesin kapal dan menyalakan lampu kabut karena jarak pandang dapat turun &lt; 200 m.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           {/* TAB 1: FASE PASCA ERUPSI */}
           {activeTab === 'phases' && (
             <div className="space-y-5">

@@ -22,6 +22,8 @@ export const ERUPTION_PRESETS: EruptionPreset[] = [
       enableAirDrag: true,
       ventElevation: 157, // elevasi kawah Anak Krakatau
       gravity: 9.81,
+      projectileCount: 6,
+      dispersionMode: 'focused',
     },
     plume: {
       columnHeight: 800, // meter di atas puncak
@@ -49,6 +51,8 @@ export const ERUPTION_PRESETS: EruptionPreset[] = [
       enableAirDrag: true,
       ventElevation: 157,
       gravity: 9.81,
+      projectileCount: 8,
+      dispersionMode: 'focused',
     },
     plume: {
       columnHeight: 2200,
@@ -76,6 +80,8 @@ export const ERUPTION_PRESETS: EruptionPreset[] = [
       enableAirDrag: true,
       ventElevation: 157,
       gravity: 9.81,
+      projectileCount: 10,
+      dispersionMode: 'radial',
     },
     plume: {
       columnHeight: 3000,
@@ -103,6 +109,8 @@ export const ERUPTION_PRESETS: EruptionPreset[] = [
       enableAirDrag: true,
       ventElevation: 157,
       gravity: 9.81,
+      projectileCount: 16,
+      dispersionMode: 'radial',
     },
     plume: {
       columnHeight: 4500,

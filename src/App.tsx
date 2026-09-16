@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useCallback } from 'react';
-import { BallisticParams, PlumeParams, EruptionPresetId, AppTab } from './types';
+import React, { useState, useCallback, useEffect } from 'react';
+import { BallisticParams, PlumeParams, EruptionPresetId, AppTab, KrakatauWeather } from './types';
 import { ERUPTION_PRESETS } from './data/presets';
 import { volcanicAudio } from './physics/audio';
 import { Header } from './components/Header';
@@ -15,7 +15,14 @@ import { ControlPanel } from './components/ControlPanel';
 import { MetricsDashboard } from './components/MetricsDashboard';
 import { PhysicsTheoryModal } from './components/PhysicsTheoryModal';
 import { BmkgAdvisoryModal } from './components/BmkgAdvisoryModal';
+import { KrakatauWeatherModal } from './components/KrakatauWeatherModal';
+import { VolcanicEjectaDetailModal } from './components/VolcanicEjectaDetailModal';
+import { AshDispersalDetailModal } from './components/AshDispersalDetailModal';
+import { AerosolSimulationModal } from './components/AerosolSimulationModal';
+import { ExportPdfModal } from './components/ExportPdfModal';
+import { IntroModal } from './components/IntroModal';
 import { BmkgSigmetScenario } from './data/bmkgData';
+import { fetchKrakatauWeather } from './services/weatherService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('satellite');
@@ -23,11 +30,79 @@ export default function App() {
   const [isMuted, setIsMuted] = useState<boolean>(true);
   const [triggerCount, setTriggerCount] = useState<number>(1);
   const [isBmkgModalOpen, setIsBmkgModalOpen] = useState<boolean>(false);
+  const [isWeatherModalOpen, setIsWeatherModalOpen] = useState<boolean>(false);
+  const [isEjectaModalOpen, setIsEjectaModalOpen] = useState<boolean>(false);
+  const [isAshDetailModalOpen, setIsAshDetailModalOpen] = useState<boolean>(false);
+  const [isAerosolModalOpen, setIsAerosolModalOpen] = useState<boolean>(false);
+  const [isExportPdfModalOpen, setIsExportPdfModalOpen] = useState<boolean>(false);
+  const [isIntroModalOpen, setIsIntroModalOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('simkratoa_intro_seen') !== 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  // Weather state & auto-sync
+  const [weather, setWeather] = useState<KrakatauWeather | null>(null);
+  const [isLoadingWeather, setIsLoadingWeather] = useState<boolean>(false);
+  const [isAutoSyncWeather, setIsAutoSyncWeather] = useState<boolean>(false);
 
   // Active simulation parameters initialized from first preset
   const defaultPreset = ERUPTION_PRESETS[0];
   const [ballistic, setBallistic] = useState<BallisticParams>(defaultPreset.ballistic);
   const [plume, setPlume] = useState<PlumeParams>(defaultPreset.plume);
+
+  const loadWeather = useCallback(async () => {
+    setIsLoadingWeather(true);
+    try {
+      const data = await fetchKrakatauWeather();
+      setWeather(data);
+      if (isAutoSyncWeather) {
+        setPlume((prev) => ({
+          ...prev,
+          windSpeed: data.wind.speedMs,
+          windDirection: data.wind.directionDeg,
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to load Krakatau weather:', err);
+    } finally {
+      setIsLoadingWeather(false);
+    }
+  }, [isAutoSyncWeather]);
+
+  // Initial weather load & periodic refresh
+  useEffect(() => {
+    loadWeather();
+    const interval = setInterval(() => {
+      loadWeather();
+    }, 5 * 60 * 1000); // 5 min interval
+    return () => clearInterval(interval);
+  }, [loadWeather]);
+
+  const handleApplyWeatherWind = useCallback((speed: number, dir: number) => {
+    setPlume((prev) => ({
+      ...prev,
+      windSpeed: speed,
+      windDirection: dir,
+    }));
+    setTriggerCount((c) => c + 1);
+  }, []);
+
+  const handleToggleAutoSyncWeather = useCallback(() => {
+    setIsAutoSyncWeather((prev) => {
+      const next = !prev;
+      if (next && weather) {
+        setPlume((p) => ({
+          ...p,
+          windSpeed: weather.wind.speedMs,
+          windDirection: weather.wind.directionDeg,
+        }));
+      }
+      return next;
+    });
+  }, [weather]);
 
   const handleSelectPreset = useCallback((presetId: EruptionPresetId) => {
     const found = ERUPTION_PRESETS.find((p) => p.id === presetId);
@@ -99,6 +174,13 @@ export default function App() {
         onSelectPreset={handleSelectPreset}
         onOpenRoadmap={() => setActiveTab('theory')}
         onOpenBmkg={() => setIsBmkgModalOpen(true)}
+        weather={weather}
+        onOpenWeather={() => setIsWeatherModalOpen(true)}
+        onOpenEjectaDetail={() => setIsEjectaModalOpen(true)}
+        onOpenAshDetail={() => setIsAshDetailModalOpen(true)}
+        onOpenAerosol={() => setIsAerosolModalOpen(true)}
+        onOpenExportPdf={() => setIsExportPdfModalOpen(true)}
+        onOpenIntro={() => setIsIntroModalOpen(true)}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
@@ -114,6 +196,15 @@ export default function App() {
               onUpdateWind={handleUpdateWind}
               onUpdateBallistic={handleUpdateBallistic}
               onUpdatePlume={handleUpdatePlume}
+              weather={weather}
+              isLoadingWeather={isLoadingWeather}
+              onRefreshWeather={loadWeather}
+              isAutoSyncWeather={isAutoSyncWeather}
+              onToggleAutoSyncWeather={handleToggleAutoSyncWeather}
+              onOpenWeatherModal={() => setIsWeatherModalOpen(true)}
+              onOpenAerosolModal={() => setIsAerosolModalOpen(true)}
+              selectedPreset={selectedPreset}
+              onOpenBmkgModal={() => setIsBmkgModalOpen(true)}
             />
             <ControlPanel
               ballistic={ballistic}
@@ -121,6 +212,12 @@ export default function App() {
               onUpdateBallistic={handleUpdateBallistic}
               onUpdatePlume={handleUpdatePlume}
               onTriggerEruption={handleTriggerEruption}
+              weather={weather}
+              onOpenWeatherModal={() => setIsWeatherModalOpen(true)}
+              onOpenEjectaDetail={() => setIsEjectaModalOpen(true)}
+              onOpenAshDetail={() => setIsAshDetailModalOpen(true)}
+              onOpenAerosol={() => setIsAerosolModalOpen(true)}
+              onOpenExportPdf={() => setIsExportPdfModalOpen(true)}
             />
           </div>
         )}
@@ -140,6 +237,12 @@ export default function App() {
               onUpdateBallistic={handleUpdateBallistic}
               onUpdatePlume={handleUpdatePlume}
               onTriggerEruption={handleTriggerEruption}
+              weather={weather}
+              onOpenWeatherModal={() => setIsWeatherModalOpen(true)}
+              onOpenEjectaDetail={() => setIsEjectaModalOpen(true)}
+              onOpenAshDetail={() => setIsAshDetailModalOpen(true)}
+              onOpenAerosol={() => setIsAerosolModalOpen(true)}
+              onOpenExportPdf={() => setIsExportPdfModalOpen(true)}
             />
           </div>
         )}
@@ -150,6 +253,19 @@ export default function App() {
               ballistic={ballistic}
               plume={plume}
               triggerCount={triggerCount}
+              onUpdateWind={handleUpdateWind}
+              onUpdateBallistic={handleUpdateBallistic}
+              onUpdatePlume={handleUpdatePlume}
+              weather={weather}
+              isLoadingWeather={isLoadingWeather}
+              onRefreshWeather={loadWeather}
+              isAutoSyncWeather={isAutoSyncWeather}
+              onToggleAutoSyncWeather={handleToggleAutoSyncWeather}
+              onOpenWeatherModal={() => setIsWeatherModalOpen(true)}
+              onOpenAerosolModal={() => setIsAerosolModalOpen(true)}
+              onOpenEjectaDetail={() => setIsEjectaModalOpen(true)}
+              onOpenAshDetail={() => setIsAshDetailModalOpen(true)}
+              onOpenBmkg={() => setIsBmkgModalOpen(true)}
             />
             <ControlPanel
               ballistic={ballistic}
@@ -157,6 +273,12 @@ export default function App() {
               onUpdateBallistic={handleUpdateBallistic}
               onUpdatePlume={handleUpdatePlume}
               onTriggerEruption={handleTriggerEruption}
+              weather={weather}
+              onOpenWeatherModal={() => setIsWeatherModalOpen(true)}
+              onOpenEjectaDetail={() => setIsEjectaModalOpen(true)}
+              onOpenAshDetail={() => setIsAshDetailModalOpen(true)}
+              onOpenAerosol={() => setIsAerosolModalOpen(true)}
+              onOpenExportPdf={() => setIsExportPdfModalOpen(true)}
             />
           </div>
         )}
@@ -185,6 +307,22 @@ export default function App() {
         </div>
       </footer>
 
+      {/* Global Volcanic Ejecta / Ballistic Shower Detail Modal */}
+      <VolcanicEjectaDetailModal
+        isOpen={isEjectaModalOpen}
+        onClose={() => setIsEjectaModalOpen(false)}
+        ballistic={ballistic}
+        plume={plume}
+      />
+
+      {/* Global Ash Dispersal & Isopach Matrix Modal */}
+      <AshDispersalDetailModal
+        isOpen={isAshDetailModalOpen}
+        onClose={() => setIsAshDetailModalOpen(false)}
+        plume={plume}
+        ballistic={ballistic}
+      />
+
       {/* Global BMKG Official Data & Affected Areas Modal */}
       <BmkgAdvisoryModal
         isOpen={isBmkgModalOpen}
@@ -194,6 +332,49 @@ export default function App() {
         onFocusAreaOnMap={() => {
           setActiveTab('satellite');
           setIsBmkgModalOpen(false);
+        }}
+      />
+
+      {/* Global Real-Time Krakatau Weather Modal */}
+      <KrakatauWeatherModal
+        isOpen={isWeatherModalOpen}
+        onClose={() => setIsWeatherModalOpen(false)}
+        weather={weather}
+        isLoading={isLoadingWeather}
+        onRefresh={loadWeather}
+        onApplyWind={handleApplyWeatherWind}
+        currentSimWindSpeed={plume.windSpeed}
+        currentSimWindDirection={plume.windDirection}
+        isAutoSync={isAutoSyncWeather}
+        onToggleAutoSync={handleToggleAutoSyncWeather}
+      />
+
+      {/* Global Volcanic Aerosol Dispersal & Microphysics Modal */}
+      <AerosolSimulationModal
+        isOpen={isAerosolModalOpen}
+        onClose={() => setIsAerosolModalOpen(false)}
+        plume={plume}
+        weather={weather}
+      />
+
+      {/* Global Simulation PDF Export Modal */}
+      <ExportPdfModal
+        isOpen={isExportPdfModalOpen}
+        onClose={() => setIsExportPdfModalOpen(false)}
+        ballistic={ballistic}
+        plume={plume}
+        weather={weather}
+        selectedPreset={selectedPreset}
+      />
+
+      {/* Intro Entrance Walkthrough Modal */}
+      <IntroModal
+        isOpen={isIntroModalOpen}
+        onClose={() => setIsIntroModalOpen(false)}
+        selectedPreset={selectedPreset}
+        onSelectPreset={handleSelectPreset}
+        onStartSimulation={() => {
+          handleTriggerEruption();
         }}
       />
     </div>
