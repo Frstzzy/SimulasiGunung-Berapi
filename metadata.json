@@ -1,6 +1,0 @@
-{
-  "name": "SimKratoa",
-  "description": "SimKratoa - Platform simulasi komputasi fisika gerak peluru material vulkanik, pemodelan dispersi abu erupsi Gunung Anak Krakatau di Selat Sunda, integrasi data SIGMET BMKG, dan analisis dampak risiko kebencanaan.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
